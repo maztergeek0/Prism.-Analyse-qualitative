@@ -1,0 +1,2461 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell 
+} from 'recharts';
+import { 
+  Download, Upload, FileText, CheckCircle, AlertCircle, ChevronRight, List, 
+  MessageSquare, Settings, Play, Check, Copy, Info, FileUp, X, Calendar, Hash, Send, Bot, User,
+  Mail, Ticket, Clipboard, Lightbulb, TrendingUp, BarChart2, PieChart as PieChartIcon, Activity, Globe, ChevronDown, ShieldCheck, MoreHorizontal, Cpu, FileCheck, Loader2, Sparkles, Award, Star, Zap, Heart, ThumbsUp, PenTool, Search, Filter, Eye, Table, Quote
+} from 'lucide-react';
+
+const API_KEY = "";
+const MODEL = "gemini-2.5-flash-preview-09-2025";
+const BATCH_SIZE = 25;
+const ACTIONABLE_BATCH_SIZE = 40;
+
+const CODEBOOK = {
+  "Content & Language Sensitivity | Sensibilité du contenu et du langage": "Qualité, précision, clarté et pertinence des supports. Inclut : contenu obsolète, manquant ou confus, langage inapproprié ou offensant, terminologie dépassée. Exclut : problèmes techniques ou de traduction pure.",
+  "Suggestions for Improvement | Suggestions d’amélioration": "Feedback constructif proposant des améliorations spécifiques (ajouter, changer ou retirer un élément). Exclut : critiques ou éloges généraux sans proposition concrète.",
+  "Technical Issues | Problèmes techniques": "Performance de la plateforme ou problèmes fonctionnels. Inclut : chargement, lecture média, liens brisés, bugs système. Exclut : plaintes sur la qualité du contenu.",
+  "Course Design / Flow | Conception du cours / progression": "Structure, mise en page ou difficulté à naviguer. Inclut : confusion sur le suivi de progression, navigation peu claire, désorientation dans le flux du cours.",
+  "Certificates | Certificats (attestations)": "Accès ou obtention des certificats de complétion. Inclut : téléchargement, badges manquants.",
+  "Pacing / Length | Rythme / durée": "Feedback sur la vitesse ou la longueur du matériel. Inclut : durée des modules, vitesse de livraison.",
+  "Language / Translation | Langue / traduction": "Problèmes de traduction ou de localisation (EN vers FR). Inclut : fautes d'orthographe, coquilles, sous-titres erronés, incohérences terminologiques entre langues, sentiment que la version EN est plus intuitive que la FR.",
+  "Learning Format / Modality | Format / modalité d’apprentissage": "Mode de livraison du contenu. Inclut : préférences pour le présentiel/virtuel/ligne, désir de formats alternatifs. Exclut : problèmes techniques liés au format.",
+  "Target Audience Relevance | Pertinence pour le public cible": "Adéquation avec le rôle, le niveau ou le domaine de l'utilisateur. Inclut : niveau inadapté, manque de pertinence par rapport au poste.",
+  "User Experience (UX) | Expérience utilisateur (UX)": "Impressions générales sur le design et réponse émotionnelle à l'environnement d'apprentissage. Exclut : plaintes spécifiques codées sous Navigation ou Technique.",
+  "Accessibility | Accessibilité": "Difficultés liées au manque d'accessibilité. Inclut : incompatibilité lecteurs d'écran, absence de sous-titres, mauvais contraste des couleurs.",
+  "Quizzes / Assessments | Quiz / évaluations": "Feedback lié aux quiz ou évaluations. Inclut : réponses incorrectes, explications pauvres, notation peu claire, fonctionnalité brisée.",
+  "Facilitation | Animation": "Feedback sur les instructeurs et facilitateurs. Inclut : connaissances, préparation, engagement, gestion de la classe, logistique. Exclut : conception pure des activités.",
+  "General Feedback / Random Comments | Commentaires généraux / divers": "Impressions non spécifiques, remarques factuelles ou hors sujet. Inclut : 'bon cours', anecdotes, problèmes de canaux de feedback. Exclut : suggestions constructives.",
+  "No Comments / Not Applicable | Aucun commentaire / Sans objet": "Absence de feedback substantiel. Inclut : 'N/A', 'Rien', 'RAS', 'Pas de commentaire', champs vides."
+};
+
+const SENTIMENTS = ["Positive", "Negative", "Neutral", "Mixed"];
+
+const SENTIMENT_LABELS = {
+  Positive: "Positif",
+  Negative: "Négatif",
+  Neutral: "Neutre",
+  Mixed: "Mitigé"
+};
+
+const COLORS = ['#2dd4bf', '#f43f5e', '#6366f1', '#f59e0b'];
+
+const SENTIMENT_COLORS = {
+  Positive: '#34d399', 
+  Negative: '#fb7185', 
+  Neutral: '#94a3b8',  
+  Mixed: '#fbbf24'     
+};
+
+const THEME_COLORS = [
+  '#6366f1', 
+  '#ec4899', 
+  '#8b5cf6', 
+  '#14b8a6', 
+  '#f59e0b', 
+  '#3b82f6', 
+  '#ef4444', 
+  '#10b981'  
+];
+
+const CustomXAxisTick = ({ x, y, payload }) => {
+  const label = payload.value.split('|')[0].trim();
+  
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <foreignObject x={-45} y={12} width={90} height={40}>
+        <div 
+          xmlns="http://www.w3.org/1999/xhtml" 
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start'
+          }}
+        >
+          <span 
+            title={label}
+            style={{
+              color: '#64748b',
+              fontSize: '10.5px',
+              fontWeight: 500,
+              textAlign: 'center',
+              lineHeight: '1.3',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              wordBreak: 'break-word'
+            }}
+          >
+            {label}
+          </span>
+        </div>
+      </foreignObject>
+    </g>
+  );
+};
+
+const App = () => {
+  const [activeStep, setActiveStep] = useState(1);
+  const [rawData, setRawData] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [courseCode, setCourseCode] = useState("");
+  const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [actionableItems, setActionableItems] = useState(null);
+  const [positiveSummary, setPositiveSummary] = useState(null);
+  
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, stepName: '', title: '', subtitle: '' });
+  const [processedCount, setProcessedCount] = useState(0);
+  
+  const [trendsAnalysis, setTrendsAnalysis] = useState(null); 
+  
+  const [actionableSearch, setActionableSearch] = useState("");
+  const [actionableFilterTheme, setActionableFilterTheme] = useState("All");
+
+  const [isAnalyzingTrends, setIsAnalyzingTrends] = useState(false);
+  const [isDetectingMetadata, setIsDetectingMetadata] = useState(false);
+  const [isGeneratingSample, setIsGeneratingSample] = useState(false);
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false); 
+  
+  const [reportPreviewTab, setReportPreviewTab] = useState('summary');
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState(null);
+
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'assistant', text: "Bonjour ! Je suis votre assistant d'analyse dédié. Posez-moi vos questions sur les tendances, les points de friction ou les réussites identifiées dans ce cours." }
+  ]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+  
+  const fileInputRef = useRef(null);
+  const chatEndRef = useRef(null);
+
+  // Bloquer le défilement de la page pendant le chargement
+  useEffect(() => {
+    if (isProcessing) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    // Nettoyage si le composant est démonté
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isProcessing]);
+
+  const formatEstimatedTime = (seconds) => {
+    if (seconds === null || isNaN(seconds)) return '';
+    if (seconds < 60) return `~${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `~${m}m ${s.toString().padStart(2, '0')}s`;
+  };
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js";
+    script.async = true;
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    }
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isChatExpanded]);
+
+  useEffect(() => {
+    if (activeStep === 3 && actionableItems && actionableItems.length > 0 && !trendsAnalysis && !isAnalyzingTrends) {
+      analyzeTrends();
+    }
+  }, [activeStep, actionableItems]);
+
+  const filteredActionables = useMemo(() => {
+    if (!actionableItems) return [];
+    return actionableItems.filter(item => {
+      const matchesSearch = (item.issueSummary || "").toLowerCase().includes(actionableSearch.toLowerCase()) ||
+                            (item.comment || "").toLowerCase().includes(actionableSearch.toLowerCase());
+      const matchesTheme = actionableFilterTheme === "All" || item.relatedTheme === actionableFilterTheme;
+      return matchesSearch && matchesTheme;
+    });
+  }, [actionableItems, actionableSearch, actionableFilterTheme]);
+
+  const uniqueActionableThemes = useMemo(() => {
+    if (!actionableItems) return [];
+    const themes = actionableItems.map(i => i.relatedTheme);
+    return ["All", ...Array.from(new Set(themes))];
+  }, [actionableItems]);
+
+  const handleActionableChange = (id, field, value) => {
+    setActionableItems(prev => prev.map(item => 
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const fillRandomActionableData = () => {
+    if (!actionableItems) return;
+    
+    const validators = ["Djama", "Hatav", "Yousra", "Lanz"];
+    const recommendations = [
+      "Ouvrir un ticket IT critique.",
+      "Intégrer lors de la prochaine mise à jour.",
+      "Clarifier les consignes dans le guide.",
+      "Ajouter un exemple concret.",
+      "Vérifier la configuration serveur.",
+      "Contacter le formateur pour clarification."
+    ];
+    const priorities = ["Haute", "Normale", "Basse"];
+    const yesNo = ["Oui", "Non"];
+
+    const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+    const updatedItems = actionableItems.map(item => ({
+      ...item,
+      validationSS: getRandom(validators),
+      recommandation: getRandom(recommendations),
+      priorite: getRandom(priorities),
+      actionImmediate: getRandom(yesNo),
+      cycleDeVie: getRandom(yesNo)
+    }));
+
+    setActionableItems(updatedItems);
+  };
+
+  const callGemini = async (prompt, systemInstruction = "", isJson = true) => {
+    let delay = 1000;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const payload = {
+          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: isJson ? { responseMimeType: "application/json" } : {}
+        };
+        
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        return isJson ? JSON.parse(text) : text;
+      } catch (err) {
+        if (i === 4) throw err;
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 2;
+      }
+    }
+  };
+
+  const triggerAutoDetect = async (fName, dataText) => {
+    setIsDetectingMetadata(true);
+    const prompt = `
+      Analyse ce début de fichier (ou nom de fichier) et essaie d'extraire :
+      1. Le Code du Cours (ex: INC123, MGT400, etc.)
+      2. La Date probable des données (format YYYY-MM-DD). Si pas de date précise, utilise la date d'aujourd'hui.
+      
+      Nom fichier: "${fName}"
+      Début contenu: "${dataText.substring(0, 500)}"
+      
+      JSON attendu: { "courseCode": "...", "date": "..." }
+    `;
+
+    try {
+      const result = await callGemini(prompt, "Expert extraction données", true);
+      if (result.courseCode) setCourseCode(result.courseCode);
+      if (result.date) setAnalysisDate(result.date);
+      showToast("Contexte détecté automatiquement");
+    } catch (err) {
+      console.warn("Auto-detect failed", err);
+    } finally {
+      setIsDetectingMetadata(false);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const processFile = (file) => {
+    if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt')) {
+      setError("Veuillez déposer un fichier CSV ou TXT.");
+      return;
+    }
+    
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target.result;
+      setRawData(text);
+      setError(null);
+      triggerAutoDetect(file.name, text);
+    };
+    reader.readAsText(file);
+  };
+
+  const resetFile = (e) => {
+      if (e) e.stopPropagation();
+      setFileName("");
+      setRawData("");
+      setCourseCode("");
+      setAnalysisResult(null);
+      setActionableItems(null);
+      setPositiveSummary(null);
+      setTrendsAnalysis(null);
+      setActiveStep(1);
+      setEstimatedTimeRemaining(null);
+  }
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const onDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const generateSampleData = async () => {
+    setIsGeneratingSample(true);
+    setError(null);
+
+    const prompt = `
+      Génère un jeu de données CSV fictif pour tester une application d'analyse de feedback de cours.
+      Le CSV doit contenir une colonne "Date" et une colonne "Commentaire".
+      Génère 15 commentaires variés (positifs, négatifs, mixtes, techniques, pédagogiques) sur un cours fictif "DEMO101".
+      
+      IMPORTANT : Génère un mélange de commentaires en FRANÇAIS et en ANGLAIS (environ 50/50) pour tester les capacités bilingues de l'outil.
+      
+      La sortie doit être uniquement le texte CSV brut.
+      
+      JSON attendu : { "csvData": "Date,Commentaire\\n..." }
+    `;
+
+    try {
+      const result = await callGemini(prompt, "Générateur de données de test", true);
+      if (result.csvData) {
+        const text = result.csvData;
+        setRawData(text);
+        setFileName("demo_bilingue_data.csv");
+        triggerAutoDetect("demo_bilingue_data.csv", text);
+      }
+    } catch (err) {
+      setError("Erreur lors de la génération des données de test.");
+    } finally {
+      setIsGeneratingSample(false);
+    }
+  };
+
+  const loadDemoReport = () => {
+    setIsLoadingDemo(true);
+    setTimeout(() => {
+        setCourseCode("DEMO-UX-2024");
+        setAnalysisDate("2023-11-15");
+        setFileName("demo_final_report_data.csv");
+        setRawData("Données de démonstration chargées en mémoire.");
+
+        const demoData = [
+            { uid: 1, date: "2023-11-01", language: "Français", sentiment: "Positive", themes: ["User Experience (UX)"], comment: "L'interface est très fluide, j'aime beaucoup le mode sombre." },
+            { uid: 2, date: "2023-11-02", language: "English", sentiment: "Negative", themes: ["Technical Issues"], comment: "Cannot login on mobile app, it keeps crashing." },
+            { uid: 3, date: "2023-11-03", language: "Français", sentiment: "Mixed", themes: ["Content & Language Sensitivity"], comment: "Le contenu est bon mais les exemples sont un peu vieillots." },
+            { uid: 4, date: "2023-11-04", language: "English", sentiment: "Positive", themes: ["Facilitation"], comment: "The instructor explained complex topics very clearly." },
+            { uid: 5, date: "2023-11-05", language: "Français", sentiment: "Negative", themes: ["Certificates"], comment: "Je n'ai toujours pas reçu mon certificat après 3 jours." },
+            { uid: 6, date: "2023-11-06", language: "English", sentiment: "Positive", themes: ["Learning Format / Modality"], comment: "Love the self-paced format, fits my schedule perfectly." },
+            { uid: 7, date: "2023-11-07", language: "Français", sentiment: "Neutral", themes: ["Pacing / Length"], comment: "La durée des vidéos est correcte." },
+            { uid: 8, date: "2023-11-08", language: "English", sentiment: "Mixed", themes: ["Quizzes / Assessments"], comment: "Quizzes are helpful but some questions are ambiguous." },
+            { uid: 9, date: "2023-11-09", language: "Français", sentiment: "Positive", themes: ["Course Design / Flow"], comment: "La progression logique des modules aide à la compréhension." },
+            { uid: 10, date: "2023-11-10", language: "English", sentiment: "Negative", themes: ["Accessibility"], comment: "No subtitles on the guest lecture videos." },
+            { uid: 11, date: "2023-11-11", language: "Français", sentiment: "Positive", themes: ["Facilitation"], comment: "Super animateur, très dynamique !" },
+            { uid: 12, date: "2023-11-12", language: "English", sentiment: "Neutral", themes: ["General Feedback / Random Comments"], comment: "Good course overall." },
+            { uid: 13, date: "2023-11-13", language: "Français", sentiment: "Negative", themes: ["Technical Issues"], comment: "Le son coupe souvent dans le module 2." },
+            { uid: 14, date: "2023-11-14", language: "English", sentiment: "Positive", themes: ["Target Audience Relevance"], comment: "Exactly what I needed for my new role." },
+            { uid: 15, date: "2023-11-15", language: "Français", sentiment: "Mixed", themes: ["Learning Format / Modality"], comment: "J'aurais préféré plus d'ateliers pratiques." }
+        ];
+        setAnalysisResult(demoData);
+
+        const demoActionables = [
+            { id: 2, date: "2023-11-02", comment: "Cannot login on mobile app, it keeps crashing.", issueSummary: "Crash application mobile au login (iOS/Android)", relatedTheme: "Technical Issues", validationSS: "Djama", priorite: "Haute", actionImmediate: "Oui", cycleDeVie: "Non", recommandation: "Ouvrir un ticket IT critique." },
+            { id: 5, date: "2023-11-05", comment: "Je n'ai toujours pas reçu mon certificat après 3 jours.", issueSummary: "Délai ou échec d'émission des certificats", relatedTheme: "Certificates", validationSS: "Yousra", priorite: "Normale", actionImmediate: "Oui", cycleDeVie: "Non" },
+            { id: 10, date: "2023-11-10", comment: "No subtitles on the guest lecture videos.", issueSummary: "Absence de sous-titres (Vidéos Invités)", relatedTheme: "Accessibility", validationSS: "Hatav", priorite: "Haute", actionImmediate: "Non", cycleDeVie: "Oui", recommandation: "Intégrer les sous-titres lors de la prochaine mise à jour du module." },
+            { id: 13, date: "2023-11-13", comment: "Le son coupe souvent dans le module 2.", issueSummary: "Problème audio intermittent (Module 2)", relatedTheme: "Technical Issues", validationSS: "Lanz", priorite: "Normale", actionImmediate: "Non", cycleDeVie: "Oui" }
+        ];
+        setActionableItems(demoActionables);
+
+        setTrendsAnalysis([
+            { title: "Instabilité Technique Mobile", count: "Critique", recommendation: "Audit urgent de l'application mobile et des logs de crash." },
+            { title: "Accessibilité & Inclusion", count: "Moyenne", recommendation: "Vérifier la couverture des sous-titres sur les contenus tiers." }
+        ]);
+
+        setPositiveSummary({
+            summary: "Ce cours démontre une performance solide, particulièrement saluée pour son format flexible et la qualité de l'animation. Les apprenants soulignent une expérience utilisateur (UX) fluide et une pertinence directe pour leur développement professionnel. L'engagement des formateurs reste un atout majeur qui compense certaines limitations techniques ponctuelles.",
+            quotes: [
+                { date: "2023-11-04", comment: "The instructor explained complex topics very clearly.", tag: "Pédagogie" },
+                { date: "2023-11-01", comment: "L'interface est très fluide, j'aime beaucoup le mode sombre.", tag: "UX/UI" },
+                { date: "2023-11-14", comment: "Exactly what I needed for my new role.", tag: "Impact Pro" },
+                { date: "2023-11-09", comment: "La progression logique des modules aide à la compréhension.", tag: "Structure" },
+                { date: "2023-11-06", comment: "Love the self-paced format, fits my schedule perfectly.", tag: "Flexibilité" },
+                { date: "2023-11-11", comment: "Super animateur, très dynamique !", tag: "Animation" }
+            ],
+            keyDrivers: [
+                { title: "Expertise Pédagogique", description: "Clarté et dynamisme des instructeurs." },
+                { title: "Design & UX", description: "Interface moderne et intuitive." },
+                { title: "Pertinence", description: "Contenu adapté aux besoins du poste." }
+            ],
+            keywords: ["Fluide", "Clair", "Dynamique", "Pertinent", "Flexible", "Engageant"]
+        });
+
+        setIsLoadingDemo(false);
+        setActiveStep(5);
+    }, 800);
+  };
+
+  const parseInputData = (text) => {
+    return text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  };
+
+  const runStep1Analysis = async () => {
+    if (!rawData.trim()) return setError("Veuillez entrer des données ou déposer un fichier.");
+    
+    setIsProcessing(true);
+    setError(null);
+    setAnalysisResult(null);
+
+    try {
+        const rows = parseInputData(rawData);
+        const totalRows = rows.length;
+        const totalBatches = Math.ceil(totalRows / BATCH_SIZE);
+        
+        setBatchProgress({ 
+            current: 0, 
+            total: totalBatches, 
+            stepName: 'Lot',
+            title: 'Analyse en cours...',
+            subtitle: "L'intelligence artificielle examine et catégorise vos commentaires."
+        });
+        setProcessedCount(0);
+        setEstimatedTimeRemaining(totalBatches * 4); // Estimation initiale (4s par lot en moyenne)
+
+        let allResults = [];
+        let startTime = Date.now();
+
+        for (let i = 0; i < totalRows; i += BATCH_SIZE) {
+            const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+            setBatchProgress(prev => ({ ...prev, current: batchNumber }));
+            
+            const batchData = rows.slice(i, i + BATCH_SIZE);
+            const batchString = batchData.join("\n");
+
+            const startId = i + 1;
+
+            const systemPrompt = `
+              Vous êtes un expert en analyse qualitative.
+              Analysez le lot de commentaires suivant (Lot ${batchNumber}/${totalBatches}).
+              
+              RÈGLES CRUCIALES POUR L'INTÉGRITÉ DES DONNÉES:
+              1. Vous DEVEZ analyser CHAQUE commentaire individuel fourni.
+              2. Assignez un ID unique ("uid") séquentiel à partir de ${startId}. Le premier commentaire est ${startId}, le suivant ${startId + 1}, etc.
+              3. Utilisez UNIQUEMENT les sentiments suivants: ${SENTIMENTS.join(", ")}.
+              4. Utilisez UNIQUEMENT les thèmes du codebook : ${JSON.stringify(CODEBOOK)}.
+              5. Maximum 2 thèmes par commentaire.
+              6. Déterminez la langue : "Français" ou "English". RÈGLE ANTI-AMBIGUÏTÉ : Si plus de 70% du texte d'un commentaire est dans une langue, choisissez cette langue pour la classification.
+              
+              Sortie attendue en JSON :
+              {
+                "analysis": [
+                  { "uid": ${startId}, "comment": "...", "sentiment": "...", "themes": ["...", "..."], "language": "..." }
+                ]
+              }
+            `;
+
+            const result = await callGemini(batchString, systemPrompt, true);
+            
+            if (result && result.analysis) {
+                allResults = [...allResults, ...result.analysis];
+                setProcessedCount(prev => prev + result.analysis.length);
+            }
+            
+            // Mise à jour dynamique du temps restant
+            const elapsed = Date.now() - startTime;
+            const avgTime = elapsed / batchNumber;
+            const remaining = totalBatches - batchNumber;
+            setEstimatedTimeRemaining(Math.round((avgTime * remaining) / 1000));
+        }
+
+        const normalizedData = allResults.map((item, index) => {
+            const newItem = {};
+            Object.keys(item).forEach(key => {
+              newItem[key.toLowerCase()] = item[key];
+            });
+            if (!Array.isArray(newItem.themes)) {
+               newItem.themes = newItem.themes ? [newItem.themes] : [];
+            }
+            if (!newItem.sentiment) newItem.sentiment = "Neutral";
+            if (!newItem.language) newItem.language = "Inconnu";
+            if (!newItem.uid) newItem.uid = index + 1;
+            
+            return newItem;
+        });
+
+        setAnalysisResult(normalizedData);
+        setActiveStep(2);
+
+    } catch (err) {
+      console.error("Batch Analysis Error:", err);
+      setError("Erreur lors de l'analyse par lots. Veuillez réessayer.");
+    } finally {
+      setIsProcessing(false);
+      setBatchProgress({ current: 0, total: 0, stepName: '', title: '', subtitle: '' }); 
+      setEstimatedTimeRemaining(null);
+    }
+  };
+
+  const runStep2Actionable = async () => {
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const negativeMixedComments = analysisResult.filter(i => i.sentiment === "Negative" || i.sentiment === "Mixed");
+      let commentsToAnalyze = negativeMixedComments;
+      if (commentsToAnalyze.length === 0) {
+         commentsToAnalyze = analysisResult.filter(i => i.sentiment === "Neutral").slice(0, 50);
+      }
+
+      const totalItems = commentsToAnalyze.length;
+      const totalBatches = Math.ceil(totalItems / ACTIONABLE_BATCH_SIZE);
+      
+      setBatchProgress({ 
+          current: 0, 
+          total: totalBatches, 
+          stepName: 'Lot',
+          title: 'Extraction des actions...',
+          subtitle: "Identification des points de friction et recommandations."
+      });
+      setEstimatedTimeRemaining(totalBatches * 4); // Estimation initiale
+      let allActionables = [];
+      let startTime = Date.now();
+
+      for (let i = 0; i < totalItems; i += ACTIONABLE_BATCH_SIZE) {
+          const batchNumber = Math.floor(i / ACTIONABLE_BATCH_SIZE) + 1;
+          setBatchProgress(prev => ({ ...prev, current: batchNumber }));
+
+          const batch = commentsToAnalyze.slice(i, i + ACTIONABLE_BATCH_SIZE);
+          
+          const prompt = `
+            Voici un lot de commentaires (${batchNumber}/${totalBatches}) issus de l'analyse.
+            Données: ${JSON.stringify(batch)}
+            
+            TACHE: Extrayez les problèmes spécifiques "exploitables" (actionable).
+            Un commentaire est exploitable s'il décrit un problème concret (bug, erreur, lien brisé, manque spécifique).
+            Ignorez les plaintes vagues sans détails.
+            
+            IMPORTANT: Conservez l'ID ("uid") original pour la traçabilité.
+            
+            Sortie attendue en JSON:
+            {
+              "actionableItems": [
+                { "id": "uid_original", "date": "YYYY-MM-DD", "comment": "...", "issueSummary": "Description du problème à corriger", "relatedTheme": "..." }
+              ]
+            }
+          `;
+
+          const result = await callGemini(prompt, "Expert en amélioration de cours.", true);
+          
+          if (result && result.actionableItems) {
+             allActionables = [...allActionables, ...result.actionableItems];
+          }
+          
+          // Mise à jour dynamique du temps restant
+          const elapsed = Date.now() - startTime;
+          const avgTime = elapsed / batchNumber;
+          const remaining = totalBatches - batchNumber;
+          setEstimatedTimeRemaining(Math.round((avgTime * remaining) / 1000));
+      }
+
+      setActionableItems(allActionables);
+      setActiveStep(3);
+
+    } catch (err) {
+      console.error("Actionable Batch Error:", err);
+      setError("Erreur lors de l'extraction des éléments exploitables.");
+    } finally {
+      setIsProcessing(false);
+      setBatchProgress({ current: 0, total: 0, stepName: '', title: '', subtitle: '' });
+      setEstimatedTimeRemaining(null);
+    }
+  };
+
+  const runStep3Positive = async () => {
+    setIsProcessing(true);
+    setError(null);
+
+    setBatchProgress({ 
+        current: 0, 
+        total: 1, 
+        stepName: 'Étape',
+        title: 'Génération de la synthèse...',
+        subtitle: "Rédaction du résumé narratif et extraction des forces majeures."
+    });
+    setEstimatedTimeRemaining(6); // Estimation fixe car un seul appel unique
+
+    const positiveComments = analysisResult.filter(i => i.sentiment === "Positive");
+    const sample = positiveComments.length > 50 ? positiveComments.slice(0, 50) : positiveComments;
+
+    const prompt = `
+      Analyse ces commentaires positifs : ${JSON.stringify(sample)}
+      
+      Génère un rapport de succès structuré :
+      1. "summary": Un paragraphe narratif inspirant sur les réussites du cours.
+      2. "quotes": 6 citations les plus impactantes. Pour chaque citation, ajoute un court "tag" (1-2 mots) qui résume le sujet (ex: Pédagogie, Support, Contenu).
+      3. "keyDrivers": Identifie 3 facteurs clés de succès (ex: "Qualité vidéo", "Expertise formateur"). Pour chaque facteur, donne un court sous-titre expliquant pourquoi.
+      4. "keywords": Liste de 5 à 8 adjectifs positifs récurrents ou mots-clés forts (ex: "Clair", "Passionnant", "Utile").
+      
+      Sortie JSON attendue:
+      {
+        "summary": "...",
+        "quotes": [{ "date": "...", "comment": "...", "tag": "..." }],
+        "keyDrivers": [{ "title": "...", "description": "..." }],
+        "keywords": ["...", "..."]
+      }
+    `;
+
+    setBatchProgress(prev => ({ ...prev, current: 1 }));
+
+    try {
+      const result = await callGemini(prompt, "Expert en succès client.", true);
+      setPositiveSummary(result);
+      setActiveStep(4);
+      setChatHistory(prev => [...prev, { 
+        role: 'assistant', 
+        text: `Félicitations ! L'analyse est terminée. Vous disposez maintenant du rapport complet et je suis prêt à répondre à vos questions spécifiques (Q&A).` 
+      }]);
+    } catch (err) {
+      setError("Erreur lors du résumé positif.");
+    } finally {
+      setIsProcessing(false);
+      setBatchProgress({ current: 0, total: 0, stepName: '', title: '', subtitle: '' });
+      setEstimatedTimeRemaining(null);
+    }
+  };
+
+  const analyzeTrends = async () => {
+    if (!actionableItems || actionableItems.length === 0) return;
+    setIsAnalyzingTrends(true);
+    
+    const prompt = `
+      Analyse cette liste de problèmes identifiés dans un cours :
+      ${JSON.stringify(actionableItems.map(i => i.issueSummary))}
+      
+      Regroupe ces problèmes pour identifier 3 à 5 "Tendances Critiques" majeures.
+      Pour chaque tendance, donne un titre, le nombre approximatif d'occurrences, et une recommandation globale.
+      
+      JSON attendu:
+      {
+        "trends": [
+          { "title": "Titre de la tendance", "count": "Estimation du volume", "recommendation": "Conseil global" }
+        ]
+      }
+    `;
+
+    try {
+      const result = await callGemini(prompt, "Analyste de Données Pédagogiques", true);
+      setTrendsAnalysis(result.trends);
+    } catch (err) {
+      setError("Erreur lors de l'analyse des tendances.");
+    } finally {
+      setIsAnalyzingTrends(false);
+    }
+  };
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    if (!analysisResult) {
+      setError("Veuillez d'abord effectuer l'analyse complète.");
+      return;
+    }
+
+    const userMsg = chatInput;
+    setChatInput("");
+    setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
+    setIsChatLoading(true);
+
+    const prompt = `
+      CONTEXTE DONNÉES:
+      ${JSON.stringify(analysisResult.slice(0, 100))} (Extrait des 100 premiers pour contexte)
+      
+      RÉSUMÉ POSITIF:
+      ${JSON.stringify(positiveSummary)}
+      
+      ACTIONABLES:
+      ${JSON.stringify(actionableItems)}
+      
+      QUESTION UTILISATEUR:
+      "${userMsg}"
+      
+      INSTRUCTIONS:
+      Répondez à la question en vous basant UNIQUEMENT sur les données fournies ci-dessus.
+      Soyez professionnel, concis et utile pour une analyse de cours.
+    `;
+
+    try {
+      const responseText = await callGemini(prompt, "Tu es un assistant expert en analyse de données pédagogiques.", false);
+      setChatHistory(prev => [...prev, { role: 'assistant', text: responseText }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'assistant', text: "Désolé, une erreur est survenue lors du traitement de votre question." }]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
+  const sentimentCounts = useMemo(() => {
+    if (!analysisResult) return [];
+    const counts = {};
+    analysisResult.forEach(item => {
+      if (item.sentiment) {
+        counts[item.sentiment] = (counts[item.sentiment] || 0) + 1;
+      }
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [analysisResult]);
+
+  const themeStatistics = useMemo(() => {
+    if (!analysisResult) return { themeCounts: [], sentimentByTheme: [] };
+
+    const tCounts = {};
+    const tSentiments = {};
+
+    analysisResult.forEach(item => {
+      if (Array.isArray(item.themes)) {
+        item.themes.forEach(theme => {
+          tCounts[theme] = (tCounts[theme] || 0) + 1;
+          if (!tSentiments[theme]) {
+            tSentiments[theme] = { name: theme, Positive: 0, Negative: 0, Neutral: 0, Mixed: 0 };
+          }
+          if (item.sentiment && tSentiments[theme][item.sentiment] !== undefined) {
+            tSentiments[theme][item.sentiment]++;
+          }
+        });
+      }
+    });
+
+    const themeCounts = Object.entries(tCounts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8); 
+
+    const sentimentByTheme = Object.values(tSentiments)
+      .filter(t => themeCounts.some(tc => tc.name === t.name)) 
+      .sort((a, b) => (b.Negative + b.Mixed) - (a.Negative + a.Mixed)); 
+
+    return { themeCounts, sentimentByTheme };
+  }, [analysisResult]);
+
+  const kpis = useMemo(() => {
+    if (!analysisResult) return null;
+    const total = analysisResult.length;
+    const positive = analysisResult.filter(i => i.sentiment === 'Positive').length;
+    const satisfaction = total > 0 ? Math.round((positive / total) * 100) : 0;
+    const topTheme = themeStatistics.themeCounts.length > 0 ? themeStatistics.themeCounts[0].name : "N/A";
+    
+    return { total, satisfaction, topTheme };
+  }, [analysisResult, themeStatistics]);
+
+  const exportToExcel = (data, filename, sheetName) => {
+    if (!data || data.length === 0) return;
+    if (!window.XLSX) {
+      showToast("Le module Excel est en cours de chargement. Veuillez réessayer dans quelques secondes.");
+      return;
+    }
+
+    const ws = window.XLSX.utils.json_to_sheet(data);
+    const wscols = Object.keys(data[0]).map(k => ({ wch: Math.max(k.length + 5, 20) }));
+    ws['!cols'] = wscols;
+
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 30)); 
+    window.XLSX.writeFile(wb, filename);
+  };
+
+  const handleExportStep1 = () => {
+    if (!analysisResult) return;
+    
+    const formattedData = analysisResult.map(item => ({
+      "Unique ID | ID Unique": item.uid,
+      "Date | Date": item.date || "Inconnue",
+      "Langue | Language": item.language || "Inconnu",
+      "Sentiment | Sentiment": item.sentiment,
+      "Thème 1 | Theme 1": item.themes && item.themes[0] ? item.themes[0] : "",
+      "Thème 2 | Theme 2": item.themes && item.themes[1] ? item.themes[1] : "",
+      "Commentaire | Comment": item.comment
+    }));
+
+    exportToExcel(formattedData, `Analyse_Verbatims_${courseCode || 'Export'}.xlsx`, "Verbatims");
+  };
+
+  const handleExportActionables = () => {
+    if (!actionableItems || !analysisResult) return;
+
+    const formattedData = actionableItems.map(item => {
+      const original = analysisResult.find(r => r.uid === item.id) || {};
+      
+      return {
+        "Unique ID | ID Unique": item.id,
+        "Date | Date": item.date || original.date || "Inconnue",
+        "Langue | Language": original.language || "Inconnu",
+        "Sentiment Original | Original Sentiment": original.sentiment || "Inconnu",
+        "Thème Principal | Main Theme": item.relatedTheme,
+        "Problème à corriger | Issue to Fix": item.issueSummary,
+        "Commentaire Original | Original Comment": item.comment,
+        "Validation S&S": item.validationSS || "",
+        "Recommandation": item.recommandation || "",
+        "Priorité": item.priorite || "",
+        "Action immédiate": item.actionImmediate || "",
+        "Pour le cycle de vie": item.cycleDeVie || "",
+        "Thème 1 (Origine) | Theme 1 (Original)": original.themes && original.themes[0] ? original.themes[0] : "",
+        "Thème 2 (Origine) | Theme 2 (Original)": original.themes && original.themes[1] ? original.themes[1] : ""
+      };
+    });
+
+    exportToExcel(formattedData, `Plan_Action_${courseCode || 'Export'}.xlsx`, "Actions Requises");
+  };
+
+  const generateFinalReport = () => {
+    if (!analysisResult || !window.XLSX) {
+       showToast("Génération Excel en cours de préparation... Si cela échoue, un CSV sera généré.");
+       if(!window.XLSX) return; 
+    }
+    
+    const wb = window.XLSX.utils.book_new();
+    const frCount = analysisResult.filter(i => i.language === 'Français').length;
+    const enCount = analysisResult.filter(i => i.language === 'English').length;
+
+    const summaryKpiData = [
+      ["RAPPORT D'ANALYSE QUALITATIVE | QUALITATIVE ANALYSIS REPORT", courseCode || 'COURS INCONNU'],
+      ["Date du rapport | Report Date", new Date().toLocaleDateString()],
+      ["Date des données | Data Date", analysisDate],
+      [],
+      ["1. INDICATEURS CLÉS (KPIs) | KEY INDICATORS"],
+      ["Indicateur | Indicator", "Valeur | Value", "Détails | Details"],
+      ["Volume Total | Total Volume", kpis?.total || 0, `FR: ${frCount} / EN: ${enCount}`],
+      ["Taux de Satisfaction | Satisfaction Rate", `${kpis?.satisfaction || 0}%`, "Basé sur les sentiments positifs | Based on positive sentiment"],
+      ["Thème Dominant | Top Theme", kpis?.topTheme || 'N/A', "Sujet le plus fréquent | Most frequent topic"],
+      ["Actions Requises | Actions Required", actionableItems ? actionableItems.length : 0, "Points de friction identifiés | Friction points identified"]
+    ];
+
+    const wsSummary = window.XLSX.utils.aoa_to_sheet(summaryKpiData);
+    wsSummary['!cols'] = [{wch:30}, {wch:15}, {wch:40}];
+    window.XLSX.utils.book_append_sheet(wb, wsSummary, "Résumé & KPIs");
+
+    const rawData = [
+      ["2. ANALYSE DÉTAILLÉE (TOUS LES COMMENTAIRES) | DETAILED ANALYSIS (ALL COMMENTS)"],
+      ["ID Unique | Unique ID", "Date | Date", "Langue | Language", "Sentiment | Sentiment", "Thème 1 | Theme 1", "Thème 2 | Theme 2", "Commentaire | Comment"]
+    ];
+
+    analysisResult.forEach(item => {
+      rawData.push([
+        item.uid,
+        item.date || analysisDate,
+        item.language,
+        item.sentiment,
+        item.themes && item.themes[0] ? item.themes[0] : "",
+        item.themes && item.themes[1] ? item.themes[1] : "",
+        item.comment
+      ]);
+    });
+
+    const wsRaw = window.XLSX.utils.aoa_to_sheet(rawData);
+    wsRaw['!cols'] = [{wch:15}, {wch:12}, {wch:10}, {wch:12}, {wch:25}, {wch:25}, {wch:50}];
+    window.XLSX.utils.book_append_sheet(wb, wsRaw, "Données Détaillées");
+
+    let actionsData = [
+      ["PLAN D'ACTIONS CORRECTIVES | CORRECTIVE ACTION PLAN"],
+      ["ID Source | Source ID", "Commentaire Original | Original Comment", "Thème Concerné | Related Theme", "Problème Identifié | Issue Identified", "Validation S&S", "Recommandation", "Priorité", "Action immédiate", "Pour le cycle de vie"]
+    ];
+
+    if (actionableItems && actionableItems.length > 0) {
+        actionableItems.forEach(item => {
+            actionsData.push([
+              item.id,
+              item.comment,
+              item.relatedTheme,
+              item.issueSummary,
+              item.validationSS || "",
+              item.recommandation || "",
+              item.priorite || "",
+              item.actionImmediate || "",
+              item.cycleDeVie || ""
+            ]);
+        });
+    } else {
+        actionsData.push(["Aucune action corrective majeure détectée.", "", "", "", "", "", "", "", ""]);
+    }
+    
+    if (trendsAnalysis) {
+        actionsData.push([]);
+        actionsData.push(["TENDANCES CRITIQUES DÉTECTÉES | CRITICAL TRENDS DETECTED"]);
+        actionsData.push(["Tendance | Trend", "Volume Estimé | Estimated Volume", "Recommandation | Recommendation"]);
+        trendsAnalysis.forEach((t) => {
+             actionsData.push([t.title, `~${t.count}`, t.recommendation]);
+        });
+    }
+
+    const wsActions = window.XLSX.utils.aoa_to_sheet(actionsData);
+    wsActions['!cols'] = [{wch:15}, {wch:50}, {wch:30}, {wch:40}, {wch:15}, {wch:40}, {wch:15}, {wch:15}, {wch:15}];
+    window.XLSX.utils.book_append_sheet(wb, wsActions, "Actions Correctives");
+
+    const successData = [
+      ["SYNTHÈSE DES FORCES & RÉUSSITES | STRENGTHS & SUCCESSES SUMMARY"],
+      [],
+      ["RÉSUMÉ NARRATIF | NARRATIVE SUMMARY"],
+      [positiveSummary?.summary || "Aucun résumé disponible."],
+      [],
+      ["FACTEURS CLÉS DE SUCCÈS | KEY SUCCESS DRIVERS"],
+      ["Facteur | Driver", "Description | Description"]
+    ];
+
+    if (positiveSummary?.keyDrivers) {
+        positiveSummary.keyDrivers.forEach(d => {
+            successData.push([d.title, d.description]);
+        });
+    }
+
+    successData.push([]);
+    successData.push(["CITATIONS MARQUANTES | KEY QUOTES"]);
+    if (positiveSummary?.quotes) {
+        positiveSummary.quotes.forEach((q, i) => {
+            successData.push([`"${q.comment}"`]);
+        });
+    }
+
+    const wsSuccess = window.XLSX.utils.aoa_to_sheet(successData);
+    wsSuccess['!cols'] = [{wch:30}, {wch:60}];
+    window.XLSX.utils.book_append_sheet(wb, wsSuccess, "Forces & Réussites");
+
+    window.XLSX.writeFile(wb, `${courseCode || 'Cours'}_Rapport_Complet_${analysisDate}.xlsx`);
+  };
+
+  const copyToClipboard = (text) => {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        document.execCommand('copy');
+        showToast("Copié dans le presse-papier !");
+      } catch (err) {
+        console.error('Erreur lors de la copie', err);
+        setError("Impossible de copier le texte.");
+      }
+      
+      document.body.removeChild(textArea);
+  }
+
+  const isChatAccessible = !!positiveSummary;
+
+  const renderThemeBadge = (theme) => {
+    if (!theme) return null;
+    return (
+        <span className="inline-flex items-center px-2.5 py-1 rounded-[8px] text-[11px] font-medium tracking-wide bg-slate-50/80 text-slate-600 border border-slate-200/50 break-words text-left">
+            {theme}
+        </span>
+    );
+  };
+
+  const renderLanguageBadge = (lang) => {
+    if (!lang) return null;
+    const isEN = lang === 'English';
+    const isFR = lang === 'Français';
+    return (
+      <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-[8px] text-[11px] font-semibold border transition-colors ${
+          isEN ? 'bg-indigo-50/50 text-indigo-600 border-indigo-100/50' :
+          isFR ? 'bg-amber-50/50 text-amber-700 border-amber-100/50' :
+          'bg-slate-50 text-slate-500 border-slate-200/50'
+      }`}>
+          {isEN ? 'EN' : isFR ? 'FR' : '??'}
+      </span>
+    );
+  };
+
+  const STEPS = [
+    { id: 1, label: "Importation", icon: Check, sub: "Réussite" },
+    { id: 2, label: "Sentiments & thèmes", icon: Cpu, sub: "En cours..." }, 
+    { id: 3, label: "Actions correctives", icon: TrendingUp, sub: "Attente" },
+    { id: 4, label: "Forces & réussites", icon: Award, sub: "Attente" }, 
+    { id: 5, label: "Rapport final", icon: FileCheck, sub: "Attente" }
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+        .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+      `}} />
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-200/60 shadow-[0_2px_20px_rgb(0,0,0,0.02)] transition-all supports-[backdrop-filter]:bg-white/80">
+        <div className="max-w-[1800px] w-full mx-auto px-6 py-3 flex items-center justify-between gap-4">
+          
+          <div className="shrink-0 flex items-center gap-1.5">
+            <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-900">
+              <path d="M12 2L2 20h20L12 2z" />
+              <path d="M12 2v18" />
+              <path d="M2 20l10-8 10 8" />
+            </svg>
+            <div className="flex items-baseline gap-2">
+              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tighter">
+                Prism.
+              </h1>
+              <span className="text-slate-400 text-[12px] font-medium tracking-wide mb-0.5">
+                Analyse qualitative
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+             <div className="flex items-center bg-white/60 backdrop-blur-2xl p-1 rounded-full border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+                {STEPS.map((step) => {
+                  const isCompleted = activeStep > step.id;
+                  const isCurrent = activeStep === step.id;
+                  const isUpcoming = activeStep < step.id;
+                  const Icon = step.icon;
+                  
+                  return (
+                    <button 
+                      key={step.id}
+                      onClick={() => { if (isCompleted || (step.id === 5 && isChatAccessible)) setActiveStep(step.id); }}
+                      disabled={isUpcoming && step.id !== 5 && !isChatAccessible}
+                      className={`
+                        group relative flex items-center justify-center transition-all duration-500 ease-out overflow-hidden
+                        ${isCurrent ? 'bg-slate-900 text-white rounded-full h-[36px] px-5 shadow-md' : 'bg-transparent hover:bg-slate-200/50 rounded-full h-[36px] w-[36px]'}
+                        ${isCompleted ? 'text-slate-800 cursor-pointer' : ''}
+                        ${isUpcoming && !isCurrent ? 'text-slate-300' : ''}
+                      `}
+                      title={!isCurrent ? step.label : ""}
+                    >
+                      <div className={`shrink-0 transition-transform duration-300 ${isCurrent ? 'scale-110' : 'group-hover:scale-110'}`}>
+                        {isCompleted ? <Check size={14} strokeWidth={3.5} /> : <Icon size={14} strokeWidth={isCurrent ? 2.5 : 2} />}
+                      </div>
+                      
+                      <span className={`text-[13px] font-semibold tracking-wide transition-all duration-500 ease-out whitespace-nowrap
+                        ${isCurrent ? 'max-w-[200px] opacity-100 ml-2.5' : 'max-w-0 opacity-0 ml-0'}
+                      `}>
+                        {step.label}
+                      </span>
+                    </button>
+                  );
+                })}
+             </div>
+
+             <div className="flex items-center gap-2">
+                {isProcessing && (
+                  <span className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-[12px] font-medium rounded-full border border-indigo-100 animate-pulse">
+                    <Loader2 size={12} className="animate-spin" />
+                    {batchProgress.total > 0 ? `${batchProgress.stepName || 'Lot'} ${batchProgress.current}/${batchProgress.total}` : 'Traitement...'}
+                  </span>
+                )}
+             </div>
+          </div>
+
+        </div>
+      </header>
+
+      <main className="max-w-[1800px] w-full mx-auto p-4 md:p-8 lg:p-12 xl:p-16">
+        {activeStep === 1 && (
+          <div className="space-y-6 max-w-5xl mx-auto animate-in fade-in duration-500 mt-4 md:mt-8">
+            {!fileName ? (
+              <div className="bg-white p-8 md:p-12 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-center transition-all duration-300">
+                 <div className="mb-10 text-center">
+                    <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 mb-4">
+                       Commençons par vos données.
+                    </h2>
+                    <p className="text-[15px] text-slate-500 font-medium">
+                       Glissez votre export CSV ou texte. Nous nous occupons du reste.
+                    </p>
+                 </div>
+
+                 <div 
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`
+                    w-full relative group cursor-pointer overflow-hidden
+                    border-2 border-dashed rounded-[24px] p-12 md:p-16 transition-all duration-500 ease-out
+                    flex flex-col items-center justify-center gap-6
+                    ${isDragging 
+                      ? 'border-blue-400 bg-blue-50/50 scale-[1.02] shadow-[0_8px_40px_rgb(59,130,246,0.15)]' 
+                      : 'border-slate-200/80 bg-slate-50/50 hover:border-blue-300 hover:bg-slate-50 shadow-sm'}
+                  `}
+                >
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileChange} 
+                    className="hidden" 
+                    accept=".csv,.txt"
+                  />
+                  
+                  <div className="absolute inset-0 bg-gradient-to-tr from-blue-50/30 to-purple-50/30 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+
+                  <div className={`
+                    p-5 rounded-[20px] shadow-sm transition-all duration-500 group-hover:scale-110 group-hover:-translate-y-1
+                    ${isDragging ? 'bg-blue-100 text-blue-600' : 'bg-white text-slate-400 border border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-500 group-hover:border-blue-100'}
+                  `}>
+                    <FileUp size={40} strokeWidth={1.5} />
+                  </div>
+                  
+                  <div className="z-10 space-y-1 text-center">
+                    <h3 className="text-[17px] font-semibold tracking-tight text-slate-700 group-hover:text-blue-600 transition-colors">
+                      Sélectionnez un fichier
+                    </h3>
+                    <p className="text-slate-400 font-medium text-[13px]">Formats supportés : .csv, .txt</p>
+                  </div>
+                 </div>
+
+                 <div className="mt-10 flex flex-wrap justify-center gap-3 w-full">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); generateSampleData(); }}
+                      disabled={isGeneratingSample}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-[14px] bg-white border border-slate-200/80 shadow-[0_2px_10px_rgb(0,0,0,0.02)] text-[13px] font-semibold text-slate-500 hover:text-slate-800 hover:border-slate-300 transition-all hover:shadow-[0_4px_15px_rgb(0,0,0,0.04)]"
+                    >
+                      {isGeneratingSample ? <Loader2 size={14} className="animate-spin"/> : null}
+                      Utiliser des données de test
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); loadDemoReport(); }}
+                      disabled={isLoadingDemo}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-[14px] bg-indigo-50/50 border border-indigo-100 shadow-[0_2px_10px_rgb(0,0,0,0.02)] text-[13px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition-all hover:shadow-[0_4px_15px_rgb(0,0,0,0.04)]"
+                    >
+                      {isLoadingDemo ? <Loader2 size={14} className="animate-spin"/> : null}
+                      Voir un rapport final interactif
+                    </button>
+                 </div>
+              </div>
+            ) : (
+              <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500">
+                
+                <div className="bg-white px-6 py-4 md:px-8 md:py-5 rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-300">
+                   <div className="flex flex-col justify-center">
+                      <h3 className="text-[14px] font-semibold text-slate-800 tracking-tight">Fichier chargé avec succès</h3>
+                      <div className="text-slate-500 text-[12px] font-medium mt-0.5">
+                        {fileName}
+                      </div>
+                   </div>
+                   <button 
+                     onClick={resetFile}
+                     className="text-[12px] font-semibold text-slate-500 hover:text-slate-800 border border-slate-200/60 bg-slate-50 hover:bg-slate-100 transition-colors px-4 py-2 rounded-[10px] shadow-sm"
+                   >
+                     Changer de fichier
+                   </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-white px-5 py-3 md:py-4 rounded-[16px] shadow-sm border border-slate-200/60 flex flex-col gap-1.5 group focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50/50 transition-all">
+                     <label className="text-[12px] font-medium text-slate-500 flex items-center gap-2">
+                       Code du cours
+                     </label>
+                     <input 
+                       type="text" 
+                       value={courseCode}
+                       onChange={(e) => setCourseCode(e.target.value)}
+                       placeholder="ex: MGT-101"
+                       className="w-full bg-transparent border-none p-0 text-base font-semibold text-slate-800 focus:ring-0 outline-none placeholder:text-slate-300"
+                     />
+                  </div>
+
+                  <div className="bg-white px-5 py-3 md:py-4 rounded-[16px] shadow-sm border border-slate-200/60 flex flex-col gap-1.5 group focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-50/50 transition-all">
+                     <label className="text-[12px] font-medium text-slate-500 flex items-center gap-2">
+                       Date de référence
+                     </label>
+                     <input 
+                       type="date" 
+                       value={analysisDate}
+                       onChange={(e) => setAnalysisDate(e.target.value)}
+                       className="w-full bg-transparent border-none p-0 text-base font-semibold text-slate-800 focus:ring-0 outline-none text-slate-700 [&::-webkit-calendar-picker-indicator]:hidden"
+                     />
+                  </div>
+                </div>
+
+                <div className="bg-white py-8 px-8 md:py-10 rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-center justify-center text-center transition-all duration-300">
+                    {/* Nouveau logo animé inspiré des transitions */}
+                    <div className="relative w-16 h-16 flex items-center justify-center mb-6 group">
+                        <div className="absolute inset-0 overflow-hidden rounded-[20px] opacity-80 transition-opacity duration-500 group-hover:opacity-100">
+                            <div className="absolute -top-2 -left-2 w-12 h-12 bg-indigo-500/30 rounded-full blur-[10px] animate-[spin_6s_linear_infinite] origin-bottom-right" />
+                            <div className="absolute -bottom-2 -right-2 w-12 h-12 bg-purple-500/30 rounded-full blur-[10px] animate-[spin_8s_linear_infinite_reverse] origin-top-left" />
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-blue-400/30 rounded-full blur-[8px] animate-pulse" style={{ animationDuration: '3s' }} />
+                        </div>
+                        <div className="absolute inset-0 bg-white/40 backdrop-blur-md rounded-[20px] border border-white/60 shadow-[0_8px_20px_rgba(0,0,0,0.04)]" />
+                        
+                        {/* Icône de Prisme sur mesure */}
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600/90 relative z-10 transition-transform duration-500 group-hover:scale-110">
+                          <path d="M12 2L2 20h20L12 2z" />
+                          <path d="M12 2v18" />
+                          <path d="M2 20l10-8 10 8" />
+                        </svg>
+                    </div>
+
+                    <h2 className="font-semibold text-xl tracking-tight text-slate-900 mb-2">
+                      Tout est prêt pour l'analyse.
+                    </h2>
+                    <p className="text-[13px] text-slate-500 font-medium max-w-md">
+                      Notre IA va maintenant catégoriser chaque retour, identifier les sentiments et extraire les plans d'action.
+                    </p>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    onClick={runStep1Analysis}
+                    disabled={isProcessing || !rawData.trim() || isDetectingMetadata}
+                    className="group relative bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-[14px] font-semibold text-[13px] flex items-center gap-2 transition-all shadow-[0_4px_20px_rgba(99,102,241,0.25)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Lancer l'analyse
+                    <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                </div>
+
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 2: Thematic Results */}
+        {activeStep === 2 && analysisResult && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+            
+            <div className="space-y-8">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                
+                <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                  <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base flex items-center gap-2">
+                    Volume analysé
+                    <ShieldCheck size={18} className="text-emerald-500" title="Intégrité vérifiée" />
+                  </h4>
+                  <div className="text-5xl font-semibold tracking-tight text-slate-900 mb-4">{kpis.total}</div>
+                  <div className="flex gap-2">
+                     <span className="px-3 py-1 rounded-[8px] text-[11px] font-semibold bg-amber-50/50 text-amber-700 border border-amber-100/50">
+                       FR: {analysisResult.filter(i => i.language === 'Français').length}
+                     </span>
+                     <span className="px-3 py-1 rounded-[8px] text-[11px] font-semibold bg-indigo-50/50 text-indigo-600 border border-indigo-100/50">
+                       EN: {analysisResult.filter(i => i.language === 'English').length}
+                     </span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                  <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base">Taux de satisfaction</h4>
+                  <div className="text-5xl font-semibold tracking-tight text-slate-900 mb-4">{kpis?.satisfaction}%</div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-1">
+                    <div 
+                      className="bg-slate-900 h-full transition-all duration-1000" 
+                      style={{ width: `${kpis?.satisfaction}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                  <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base">Top thèmes</h4>
+                  <div className="space-y-3 w-full mt-2">
+                    {themeStatistics.themeCounts.slice(0, 2).map((t, i) => (
+                      <div key={i} className="flex justify-between items-start text-left gap-2">
+                         <span className="text-[13px] font-medium text-slate-700 break-words">{t.name.split('|')[0]}</span>
+                         <span className="text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-200/50 px-2.5 py-0.5 rounded-[6px] flex-shrink-0 mt-0.5">{t.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col justify-between hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-semibold tracking-tight text-slate-900 text-base">Répartition globale</h3>
+                      <p className="text-[13px] text-slate-500 font-medium">Distribution des sentiments</p>
+                    </div>
+                    <MoreHorizontal className="text-slate-300 cursor-pointer hover:text-slate-500 transition-colors" size={20}/>
+                  </div>
+                  
+                  <div className="flex items-center justify-center gap-8 py-4">
+                      <div className="relative w-48 h-48 flex-shrink-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgb(0 0 0 / 0.12)' }}
+                                itemStyle={{ color: '#1e293b', fontWeight: 600, fontSize: '13px' }}
+                                formatter={(value, name) => [`${value} avis`, SENTIMENT_LABELS[name] || name]}
+                            />
+                            <Pie
+                              data={sentimentCounts}
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={3}
+                              dataKey="value"
+                              startAngle={90}
+                              endAngle={-270}
+                              cornerRadius={8}
+                            >
+                              {sentimentCounts.map((entry, index) => (
+                                <Cell 
+                                  key={`cell-${index}`} 
+                                  fill={SENTIMENT_COLORS[entry.name] || '#cbd5e1'} 
+                                  strokeWidth={0}
+                                />
+                              ))}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                           <span className="text-4xl font-semibold tracking-tight text-slate-900 animate-in zoom-in duration-500">{analysisResult.length}</span>
+                           <span className="text-[12px] font-medium text-slate-400 mt-1">Avis</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3 min-w-[120px]">
+                        {sentimentCounts.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between group cursor-default">
+                             <div className="flex items-center gap-2">
+                                <span 
+                                  className="w-2.5 h-2.5 rounded-full ring-4 ring-slate-50 shadow-sm" 
+                                  style={{ backgroundColor: SENTIMENT_COLORS[item.name] || '#cbd5e1' }}
+                                ></span>
+                                <span className="text-[13px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">
+                                  {SENTIMENT_LABELS[item.name] || item.name}
+                                </span>
+                             </div>
+                             <span className={`text-[11px] font-bold px-2 py-0.5 rounded-[8px] transition-colors ${
+                                item.name === 'Positive' ? 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100' :
+                                item.name === 'Negative' ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-100' :
+                                item.name === 'Mixed' ? 'bg-amber-50 text-amber-600 group-hover:bg-amber-100' :
+                                'bg-slate-100 text-slate-500 group-hover:bg-slate-200'
+                             }`}>
+                               {Math.round((item.value / analysisResult.length) * 100)}%
+                             </span>
+                          </div>
+                        ))}
+                      </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col justify-between hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                  <div className="flex justify-between items-start mb-4">
+                      <div>
+                          <h3 className="font-semibold tracking-tight text-slate-900 text-base">Top thématiques</h3>
+                          <p className="text-[13px] text-slate-500 font-medium">Fréquence des sujets abordés</p>
+                      </div>
+                      <MoreHorizontal className="text-slate-300 cursor-pointer hover:text-slate-500 transition-colors" size={20}/>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-6 py-4">
+                      <div className="relative w-48 h-48 flex-shrink-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgb(0 0 0 / 0.12)' }}
+                                itemStyle={{ color: '#1e293b', fontWeight: 600, fontSize: '13px' }}
+                                formatter={(value, name) => [`${value} avis`, name.split('|')[0]]}
+                            />
+                            <Pie
+                              data={themeStatistics.themeCounts.slice(0, 5)}
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={3}
+                              dataKey="value"
+                              cornerRadius={8}
+                            >
+                              {themeStatistics.themeCounts.slice(0, 5).map((entry, index) => (
+                                <Cell 
+                                  key={`cell-${index}`} 
+                                  fill={THEME_COLORS[index % THEME_COLORS.length]} 
+                                  strokeWidth={0}
+                                />
+                              ))}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                           <span className="text-3xl font-semibold tracking-tight text-slate-900">Top 5</span>
+                           <span className="text-[12px] font-medium text-slate-400 mt-1">Sujets</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3 flex-1 min-w-0">
+                        {themeStatistics.themeCounts.slice(0, 5).map((item, idx) => (
+                          <div key={idx} className="flex items-start justify-between group cursor-default w-full gap-2">
+                             <div className="flex items-start gap-2 mt-0.5">
+                                <span 
+                                  className="w-2.5 h-2.5 rounded-full ring-4 ring-slate-50 shadow-sm flex-shrink-0 mt-1" 
+                                  style={{ backgroundColor: THEME_COLORS[idx % THEME_COLORS.length] }}
+                                ></span>
+                                <span className="text-[13px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors break-words leading-tight">
+                                  {item.name.split('|')[0].trim()}
+                                </span>
+                             </div>
+                             <span 
+                               className="text-[11px] font-bold px-2 py-0.5 rounded-[8px] flex-shrink-0 mt-0.5 transition-all opacity-90 group-hover:opacity-100"
+                               style={{ 
+                                 color: THEME_COLORS[idx % THEME_COLORS.length],
+                                 backgroundColor: `${THEME_COLORS[idx % THEME_COLORS.length]}20`
+                               }}
+                             >
+                               {Math.round((item.value / analysisResult.length) * 100)}%
+                             </span>
+                          </div>
+                        ))}
+                      </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                  <div>
+                     <h3 className="font-semibold tracking-tight text-slate-900 text-base">
+                      Sentiment par thématique
+                    </h3>
+                    <p className="text-[13px] text-slate-500 mt-1 font-medium">Identifiez les points de friction (rouge) vs points forts (vert)</p>
+                  </div>
+                  <div className="flex gap-4">
+                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#34d399] shadow-sm"></span><span className="text-[13px] font-medium text-slate-600">Positif</span></div>
+                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#94a3b8] shadow-sm"></span><span className="text-[13px] font-medium text-slate-600">Neutre</span></div>
+                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#fbbf24] shadow-sm"></span><span className="text-[13px] font-medium text-slate-600">Mitigé</span></div>
+                     <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#fb7185] shadow-sm"></span><span className="text-[13px] font-medium text-slate-600">Négatif</span></div>
+                  </div>
+                </div>
+                
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={themeStatistics.sentimentByTheme}
+                      margin={{ top: 10, right: 10, left: -20, bottom: 50 }}
+                      barCategoryGap="25%" 
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="name" 
+                        tick={<CustomXAxisTick />}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                      />
+                      <YAxis 
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{fill: '#94a3b8', fontSize: 12}}
+                      />
+                      <Tooltip 
+                        cursor={{fill: '#f8fafc'}}
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}
+                        itemStyle={{ fontSize: '13px', fontWeight: 500 }}
+                        formatter={(value, name) => [value, SENTIMENT_LABELS[name] || name]}
+                      />
+                      <Bar dataKey="Negative" stackId="a" fill={SENTIMENT_COLORS.Negative} radius={[0,0,0,0]} />
+                      <Bar dataKey="Mixed" stackId="a" fill={SENTIMENT_COLORS.Mixed} radius={[0,0,0,0]} />
+                      <Bar dataKey="Neutral" stackId="a" fill={SENTIMENT_COLORS.Neutral} radius={[0,0,0,0]} />
+                      <Bar dataKey="Positive" stackId="a" fill={SENTIMENT_COLORS.Positive} radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+            </div> 
+
+            <div className="bg-white rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 overflow-hidden">
+                <div className="px-6 py-5 border-b border-slate-100/50 bg-white/70 backdrop-blur-xl backdrop-saturate-150 flex justify-between items-center sticky top-0 z-20">
+                  <h3 className="font-semibold tracking-tight text-slate-900 text-base">
+                    Détails sentiments & thèmes
+                  </h3>
+                </div>
+                <div className="overflow-x-auto max-h-[60vh] overflow-y-auto custom-scrollbar bg-white">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                      <tr>
+                        <th className="py-4 px-6 w-28 text-[12px] font-semibold text-slate-500 tracking-wide">Langue</th>
+                        <th className="py-4 px-6 text-[12px] font-semibold text-slate-500 tracking-wide">Commentaire</th>
+                        <th className="py-4 px-6 w-32 text-[12px] font-semibold text-slate-500 tracking-wide">Sentiment</th>
+                        <th className="py-4 px-6 w-64 text-[12px] font-semibold text-slate-500 tracking-wide">Thèmes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100/80">
+                      {analysisResult.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                           <td className="py-4 px-6 align-top">
+                            {renderLanguageBadge(row.language)}
+                          </td>
+                          <td className="py-4 px-6 text-[13px] text-slate-800 leading-relaxed font-medium align-top">{row.comment}</td>
+                          <td className="py-4 px-6 align-top">
+                                  <div className="flex justify-start">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                                      row.sentiment === 'Positive' ? 'text-emerald-700 bg-emerald-50/80' : 
+                                      row.sentiment === 'Negative' ? 'text-rose-700 bg-rose-50/80' : 
+                                      row.sentiment === 'Mixed' ? 'text-amber-700 bg-amber-50/80' :
+                                      'text-slate-600 bg-slate-100/80'
+                                    }`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${
+                                        row.sentiment === 'Positive' ? 'bg-emerald-500' : 
+                                        row.sentiment === 'Negative' ? 'bg-rose-500' : 
+                                        row.sentiment === 'Mixed' ? 'bg-amber-500' :
+                                        'bg-slate-400'
+                                      }`} />
+                                      {SENTIMENT_LABELS[row.sentiment] || row.sentiment}
+                                    </span>
+                                  </div>
+                          </td>
+                          <td className="py-4 px-6 align-top">
+                            <div className="flex flex-wrap gap-1.5">
+                              {row.themes && row.themes.map((t, i) => (
+                                <React.Fragment key={i}>{renderThemeBadge(t)}</React.Fragment>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            <div className="flex justify-end gap-3 pt-6">
+              <button 
+                onClick={handleExportStep1}
+                className="bg-emerald-50/80 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 px-6 py-3 rounded-[14px] text-[13px] font-semibold transition-all duration-300 flex items-center gap-2 active:scale-[0.98] shadow-[0_2px_8px_rgb(0,0,0,0.02)]"
+              >
+                <Download size={16} /> Exporter Excel
+              </button>
+              <button
+                onClick={runStep2Actionable}
+                disabled={isProcessing}
+                className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-[14px] font-semibold text-[13px] flex items-center gap-2 transition-all shadow-[0_4px_20px_rgb(0,0,0,0.1)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Identifier les Actions Correctives
+                <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Actionable Items Results */}
+        {activeStep === 3 && actionableItems && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="font-semibold tracking-tight text-slate-900 text-base flex items-center gap-2 mb-1">
+                      <TrendingUp size={18} className="text-indigo-500"/>
+                      Analyse des tendances critiques
+                    </h3>
+                    <p className="text-[13px] text-slate-500 font-medium">
+                      L'IA analyse l'ensemble des {actionableItems.length} points bloquants pour identifier les problèmes systémiques majeurs.
+                    </p>
+                  </div>
+                  {!trendsAnalysis && (
+                     <div className="flex items-center">
+                        {isAnalyzingTrends ? (
+                            <span className="flex items-center gap-2 text-indigo-600 text-[12px] font-semibold bg-white px-4 py-2 rounded-[12px] border border-indigo-100 shadow-[0_2px_10px_rgb(0,0,0,0.02)] animate-pulse">
+                                <Loader2 size={14} className="animate-spin" />
+                                Identification des tendances...
+                            </span>
+                        ) : (
+                            <button 
+                                onClick={analyzeTrends}
+                                className="bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50 px-4 py-2 rounded-[12px] text-[12px] font-semibold flex items-center gap-2 shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all"
+                            >
+                                <Sparkles size={14} /> Relancer l'Analyse
+                            </button>
+                        )}
+                     </div>
+                  )}
+                </div>
+                
+                {trendsAnalysis && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 animate-in fade-in slide-in-from-top-4 duration-500">
+                    {trendsAnalysis.map((trend, i) => (
+                      <div key={i} className="bg-slate-50/50 p-5 rounded-[24px] border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="font-semibold text-slate-800 text-[13px] leading-snug">{trend.title}</h4>
+                          <span className="text-[10px] bg-white text-slate-500 px-2 py-1 rounded-[8px] font-semibold border border-slate-200/50 whitespace-nowrap shadow-sm">~{trend.count} vols</span>
+                        </div>
+                        <p className="text-[12px] text-slate-500 leading-relaxed font-medium">{trend.recommendation}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+
+            <div className="bg-white rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+              <div className="px-6 py-6 border-b border-slate-100/50 bg-white/70 backdrop-blur-xl backdrop-saturate-150 flex flex-col gap-4 sticky top-0 z-20">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-semibold tracking-tight text-slate-900 text-base">
+                    Actions correctives requises
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={fillRandomActionableData}
+                      className="bg-indigo-50/50 border border-indigo-100 text-indigo-600 px-3.5 py-1.5 rounded-[10px] text-[12px] flex items-center gap-2 hover:bg-indigo-50 transition-colors shadow-[0_2px_8px_rgb(0,0,0,0.01)] font-semibold"
+                      title="Remplir aléatoirement (Temporaire pour test)"
+                    >
+                      <Zap size={14} /> Remplir auto (Test)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-50/80 p-2 rounded-[16px] border border-slate-100">
+                   <div className="relative w-full md:w-64 group">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Rechercher un problème..." 
+                        value={actionableSearch}
+                        onChange={(e) => setActionableSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200/80 rounded-[12px] text-[12px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all shadow-sm"
+                      />
+                   </div>
+
+                   <div className="hidden md:block w-px h-6 bg-slate-200 mx-1"></div>
+
+                   <div className="flex items-center gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 w-full no-scrollbar">
+                      <Filter size={14} className="text-slate-400 mr-1 flex-shrink-0" />
+                      {uniqueActionableThemes.slice(0, 5).map(theme => {
+                        const count = theme === "All" ? actionableItems.length : actionableItems.filter(i => i.relatedTheme === theme).length;
+                        if (count === 0) return null;
+                        
+                        const shortName = theme === "All" ? "Tout voir" : theme.split('|')[0].trim();
+                        const isSelected = actionableFilterTheme === theme;
+
+                        return (
+                          <button
+                            key={theme}
+                            onClick={() => setActionableFilterTheme(theme)}
+                            className={`
+                              flex items-center gap-1.5 px-3.5 py-1.5 rounded-[12px] text-[11px] font-semibold transition-all whitespace-nowrap border
+                              ${isSelected 
+                                ? 'bg-slate-800 text-white border-slate-800 shadow-[0_4px_12px_rgb(0,0,0,0.1)]' 
+                                : 'bg-white text-slate-600 border-slate-200/80 hover:bg-slate-50 shadow-sm'}
+                            `}
+                          >
+                            {shortName}
+                            <span className={`px-1.5 py-0.5 rounded-[6px] text-[9px] font-bold ${isSelected ? 'bg-slate-600/50 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                              {count}
+                            </span>
+                          </button>
+                        )
+                      })}
+                   </div>
+                </div>
+              </div>
+
+              <div className="p-0 overflow-x-auto max-h-[60vh] overflow-y-auto custom-scrollbar bg-white">
+                <table className="w-full text-left border-collapse min-w-[1800px]">
+                  <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                    <tr>
+                      <th className="py-4 px-6 min-w-[250px] w-3/12 text-[12px] font-semibold text-slate-500 tracking-wide">Commentaire original</th>
+                      <th className="py-4 px-6 min-w-[150px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide">Thème relié</th>
+                      <th className="py-4 px-6 min-w-[200px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide">Problème à corriger</th>
+                      <th className="py-4 px-6 min-w-[160px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Validation S&S</th>
+                      <th className="py-4 px-6 min-w-[250px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Recommandation</th>
+                      <th className="py-4 px-6 min-w-[140px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Priorité</th>
+                      <th className="py-4 px-6 min-w-[140px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Immédiate ?</th>
+                      <th className="py-4 px-6 min-w-[140px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Cycle de vie</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100/80">
+                    {filteredActionables.length > 0 ? (
+                      filteredActionables.map((item, idx) => {
+                      return (
+                      <React.Fragment key={item.id || idx}>
+                        <tr className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                          <td className="py-4 px-6 text-[13px] text-slate-500 italic font-medium align-top leading-relaxed">"{item.comment}"</td>
+                          <td className="py-4 px-6 align-top">
+                            {renderThemeBadge(item.relatedTheme)}
+                          </td>
+                          <td className="py-4 px-6 text-[13px] font-semibold text-slate-800 align-top leading-relaxed">{item.issueSummary}</td>
+                          
+                          <td className="py-4 px-6 align-top bg-slate-50/30 group-hover:bg-slate-100/50 transition-colors border-l border-slate-100/50">
+                            <select 
+                              value={item.validationSS || ""} 
+                              onChange={(e) => handleActionableChange(item.id, 'validationSS', e.target.value)}
+                              className="w-full min-w-[130px] text-[12px] border border-slate-200 rounded-[10px] p-2 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none text-slate-700 font-medium bg-white hover:border-slate-300 transition-all shadow-sm"
+                            >
+                              <option value="">Sélectionner</option>
+                              <option value="Djama">Djama</option>
+                              <option value="Hatav">Hatav</option>
+                              <option value="Yousra">Yousra</option>
+                              <option value="Lanz">Lanz</option>
+                            </select>
+                          </td>
+
+                          <td className="py-4 px-6 align-top bg-slate-50/30 group-hover:bg-slate-100/50 transition-colors">
+                            <textarea 
+                              value={item.recommandation || ""} 
+                              onChange={(e) => handleActionableChange(item.id, 'recommandation', e.target.value)}
+                              placeholder="Ajouter une recommandation..."
+                              className="w-full text-[12px] border border-slate-200 rounded-[12px] p-3 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none resize-y min-h-[40px] text-slate-700 font-medium bg-white hover:border-slate-300 transition-all shadow-sm"
+                            />
+                          </td>
+
+                          <td className="py-4 px-6 align-top bg-slate-50/30 group-hover:bg-slate-100/50 transition-colors">
+                            <select 
+                              value={item.priorite || ""} 
+                              onChange={(e) => handleActionableChange(item.id, 'priorite', e.target.value)}
+                              className="w-full min-w-[130px] text-[12px] border border-slate-200 rounded-[10px] p-2 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none text-slate-700 font-medium bg-white hover:border-slate-300 transition-all shadow-sm"
+                            >
+                              <option value="">Sélectionner</option>
+                              <option value="Haute">Haute</option>
+                              <option value="Normale">Normale</option>
+                              <option value="Basse">Basse</option>
+                            </select>
+                          </td>
+
+                          <td className="py-4 px-6 align-top bg-slate-50/30 group-hover:bg-slate-100/50 transition-colors">
+                            <select 
+                              value={item.actionImmediate || ""} 
+                              onChange={(e) => handleActionableChange(item.id, 'actionImmediate', e.target.value)}
+                              className="w-full min-w-[130px] text-[12px] border border-slate-200 rounded-[10px] p-2 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none text-slate-700 font-medium bg-white hover:border-slate-300 transition-all shadow-sm"
+                            >
+                              <option value="">Sélectionner</option>
+                              <option value="Oui">Oui</option>
+                              <option value="Non">Non</option>
+                            </select>
+                          </td>
+
+                          <td className="py-4 px-6 align-top bg-slate-50/30 group-hover:bg-slate-100/50 transition-colors">
+                            <select 
+                              value={item.cycleDeVie || ""} 
+                              onChange={(e) => handleActionableChange(item.id, 'cycleDeVie', e.target.value)}
+                              className="w-full min-w-[130px] text-[12px] border border-slate-200 rounded-[10px] p-2 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 outline-none text-slate-700 font-medium bg-white hover:border-slate-300 transition-all shadow-sm"
+                            >
+                              <option value="">Sélectionner</option>
+                              <option value="Oui">Oui</option>
+                              <option value="Non">Non</option>
+                            </select>
+                          </td>
+
+                        </tr>
+                      </React.Fragment>
+                    )})
+                    ) : (
+                      <tr>
+                        <td colSpan="8" className="py-12 px-6 text-center text-slate-400 text-[13px] font-medium">
+                          Aucune action ne correspond à votre recherche.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-6">
+              <button 
+                onClick={handleExportActionables}
+                className="bg-emerald-50/80 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 px-6 py-3 rounded-[14px] text-[13px] font-semibold transition-all duration-300 flex items-center gap-2 active:scale-[0.98] shadow-[0_2px_8px_rgb(0,0,0,0.02)]"
+              >
+                <Download size={16} /> Exporter Excel
+              </button>
+              <button
+                onClick={runStep3Positive}
+                disabled={isProcessing}
+                className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-[14px] font-semibold text-[13px] flex items-center gap-2 transition-all shadow-[0_4px_20px_rgb(0,0,0,0.1)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Générer la synthèse des forces
+                <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Forces & Réussites */}
+        {activeStep === 4 && positiveSummary && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+            
+            {positiveSummary.keyDrivers && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {positiveSummary.keyDrivers.map((driver, index) => {
+                  const icons = [Star, Zap, Heart];
+                  const Icon = icons[index % icons.length];
+                  return (
+                    <div key={index} className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-center text-center hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                      <div className="w-14 h-14 rounded-full bg-emerald-50/80 text-emerald-600 flex items-center justify-center mb-5 border border-emerald-100/50">
+                        <Icon size={24} strokeWidth={2} />
+                      </div>
+                      <h3 className="font-semibold tracking-tight text-slate-900 text-base mb-2">{driver.title}</h3>
+                      <p className="text-[13px] text-slate-500 leading-relaxed font-medium">{driver.description}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white p-8 md:p-10 rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                <div className="flex justify-between items-start mb-6">
+                  <h2 className="font-semibold tracking-tight text-slate-900 text-base flex items-center gap-2">
+                    <CheckCircle size={22} className="text-blue-500" />
+                    Synthèse qualitative
+                  </h2>
+                  <div className="text-right">
+                     <span className="text-[12px] font-medium text-slate-500 bg-slate-50 px-3 py-1 rounded-full border border-slate-100/50">Analyse IA</span>
+                  </div>
+                </div>
+                <div className="prose prose-slate max-w-none text-slate-600 font-medium leading-relaxed text-[13px]">
+                  {positiveSummary.summary}
+                </div>
+              </div>
+
+              <div className="lg:col-span-1 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 p-8 md:p-10 rounded-[32px] border border-emerald-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                <h3 className="font-semibold tracking-tight text-emerald-900 text-base mb-6 flex items-center gap-2">
+                  <ThumbsUp size={18} className="text-emerald-600" /> Mots-clés d'impact
+                </h3>
+                <div className="flex flex-wrap gap-2.5 content-start">
+                  {positiveSummary.keywords && positiveSummary.keywords.map((word, i) => (
+                    <span 
+                      key={i} 
+                      className="bg-white text-emerald-700 px-3.5 py-1.5 rounded-[12px] text-[12px] font-semibold shadow-sm border border-emerald-100/30"
+                      style={{ fontSize: `${Math.max(0.75, 1.1 - (i * 0.05))}rem`, opacity: Math.max(0.6, 1 - (i * 0.05)) }}
+                    >
+                      {word}
+                    </span>
+                  ))}
+                  {!positiveSummary.keywords && <p className="text-[12px] text-emerald-600/60 italic font-medium">Aucun mot-clé extrait.</p>}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 bg-white rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+               <div className="px-6 py-5 border-b border-slate-100/50 bg-white/70 backdrop-blur-xl backdrop-saturate-150 flex items-center justify-between sticky top-0 z-20">
+                 <h4 className="font-semibold tracking-tight text-slate-900 text-base">
+                   Extraits des commentaires positifs
+                 </h4>
+               </div>
+               
+               <div className="overflow-x-auto overflow-y-auto max-h-[60vh] custom-scrollbar bg-white">
+                 <table className="w-full text-left border-collapse">
+                   <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                     <tr>
+                       <th className="py-4 px-6 w-40 text-[12px] font-semibold text-slate-500 tracking-wide">Thème</th>
+                       <th className="py-4 px-6 w-auto text-[12px] font-semibold text-slate-500 tracking-wide">Extrait</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100/80">
+                    {positiveSummary.quotes.map((q, i) => (
+                      <tr key={i} className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                        <td className="py-4 px-6 align-top">
+                           <span className={`inline-flex items-center px-2.5 py-1 rounded-[8px] text-[11px] font-semibold tracking-wide whitespace-nowrap ${
+                             q.tag ? 'bg-indigo-50/80 text-indigo-600 border border-indigo-100/50' : 'bg-slate-50/80 text-slate-500 border border-slate-200/50'
+                           }`}>
+                             {q.tag || "Feedback"}
+                           </span>
+                        </td>
+                        <td className="py-4 px-6 align-top">
+                          <div className="flex items-start justify-between gap-4">
+                            <span className="text-[13px] text-slate-700 font-medium italic leading-relaxed">"{q.comment}"</span>
+                            <button 
+                              onClick={() => copyToClipboard(q.comment)}
+                              className="p-1.5 rounded-[8px] text-slate-400 hover:text-slate-800 hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+                              title="Copier le texte"
+                            >
+                              <Copy size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-6">
+              <button
+                onClick={() => setActiveStep(5)}
+                className="group relative bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-[14px] font-semibold text-[13px] flex items-center gap-2 transition-all shadow-[0_4px_20px_rgb(0,0,0,0.1)] active:scale-[0.98]"
+              >
+                Accéder au rapport final
+                <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 5: Final Tracker Report */}
+        {activeStep === 5 && analysisResult && (
+          <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+            
+            <div className="shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[2rem] border border-slate-100/50 bg-white flex flex-col overflow-hidden">
+              
+              <div className="bg-white pt-12 pb-8 relative z-20 flex flex-col items-center border-b border-slate-100/50">
+                <div className="px-6 md:px-8 mb-8 text-center">
+                  <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
+                    Création du rapport d'analyse qualitative
+                  </h2>
+                </div>
+
+                <div className="w-full overflow-x-auto no-scrollbar flex justify-center px-6">
+                  <div className="inline-flex items-center p-1 bg-slate-100/80 backdrop-blur-md rounded-full border border-slate-200/50">
+                    {[
+                      { id: 'summary', label: 'Résumé & KPIs' },
+                      { id: 'data', label: 'Données détaillées' },
+                      { id: 'actions', label: 'Actions correctives' },
+                      { id: 'success', label: 'Forces & réussites' }
+                    ].map(tab => {
+                      const isActive = reportPreviewTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setReportPreviewTab(tab.id)}
+                          className={`
+                            relative px-5 py-2 text-[13px] font-medium rounded-full transition-all duration-300 ease-out whitespace-nowrap
+                            ${isActive 
+                              ? 'bg-white text-slate-900 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.1)] ring-1 ring-slate-900/5 z-10' 
+                              : 'text-slate-500 hover:text-slate-800'}
+                          `}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 bg-slate-50/30 relative z-10 border-t border-slate-100/50">
+                
+                {reportPreviewTab === 'summary' && (
+                  <div className="p-6 md:p-8 animate-in fade-in duration-300 space-y-8">
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                      <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                        <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base flex items-center gap-2">
+                          Volume analysé
+                          <ShieldCheck size={18} className="text-emerald-500" title="Intégrité vérifiée" />
+                        </h4>
+                        <div className="text-5xl font-semibold tracking-tight text-slate-900 mb-4">{analysisResult.length}</div>
+                        <div className="flex gap-2">
+                           <span className="px-3 py-1 rounded-[8px] text-[11px] font-semibold bg-amber-50/50 text-amber-700 border border-amber-100/50">
+                             FR: {analysisResult.filter(i => i.language === 'Français').length}
+                           </span>
+                           <span className="px-3 py-1 rounded-[8px] text-[11px] font-semibold bg-indigo-50/50 text-indigo-600 border border-indigo-100/50">
+                             EN: {analysisResult.filter(i => i.language === 'English').length}
+                           </span>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                        <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base">Actionables</h4>
+                        <div className="text-5xl font-semibold tracking-tight text-slate-900 mb-4">{actionableItems ? actionableItems.length : 0}</div>
+                        <span className="text-[12px] font-medium text-slate-500 bg-slate-50 px-3 py-1 rounded-[8px] border border-slate-200/50">
+                          Priorités
+                        </span>
+                      </div>
+                      
+                      <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                        <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base">Satisfaction</h4>
+                        <div className="text-5xl font-semibold tracking-tight text-slate-900 mb-4">{kpis?.satisfaction}%</div>
+                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-1">
+                          <div 
+                            className="bg-slate-900 h-full transition-all duration-1000" 
+                            style={{ width: `${kpis?.satisfaction}%` }}
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col items-start text-left hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                        <h4 className="font-semibold tracking-tight text-slate-900 mb-4 text-base">Top thèmes</h4>
+                        <div className="space-y-3 w-full mt-2">
+                          {themeStatistics.themeCounts.slice(0, 2).map((t, i) => (
+                            <div key={i} className="flex justify-between items-start text-left gap-2">
+                               <span className="text-[13px] font-medium text-slate-700 break-words">{t.name.split('|')[0]}</span>
+                               <span className="text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-200/50 px-2.5 py-0.5 rounded-[6px] flex-shrink-0 mt-0.5">{t.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                           <h5 className="font-semibold tracking-tight text-slate-900 mb-6 text-base">Répartition des sentiments</h5>
+                           <div className="flex-1 min-h-[250px]">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                  <Pie data={sentimentCounts} innerRadius={55} outerRadius={105} paddingAngle={4} dataKey="value" cornerRadius={8}>
+                                    {sentimentCounts.map((entry, index) => (<Cell key={`cell-${index}`} fill={SENTIMENT_COLORS[entry.name] || '#cbd5e1'} strokeWidth={0} />))}
+                                  </Pie>
+                                  <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }} itemStyle={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }} />
+                                  <Legend 
+                                    verticalAlign="bottom" 
+                                    height={36} 
+                                    iconType="circle" 
+                                    formatter={(value, entry) => {
+                                      const pct = Math.round((entry.payload.value / analysisResult.length) * 100);
+                                      const label = SENTIMENT_LABELS[value] || value;
+                                      return <span className="text-slate-600 font-medium text-[13px] ml-1">{label} ({pct}%)</span>;
+                                    }}
+                                  />
+                                </PieChart>
+                              </ResponsiveContainer>
+                           </div>
+                        </div>
+
+                        <div className="bg-white p-8 rounded-[32px] border border-slate-100/50 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300">
+                           <h5 className="font-semibold tracking-tight text-slate-900 mb-6 text-base">Volumes par thème</h5>
+                           <div className="flex-1 min-h-[250px] flex flex-col justify-center gap-6 pt-2">
+                              {themeStatistics.themeCounts.slice(0, 5).map((t, i) => {
+                                  const maxVal = themeStatistics.themeCounts[0]?.value || 1;
+                                  const pct = (t.value / maxVal) * 100;
+                                  const shortName = t.name.split('|')[0].trim();
+                                  return (
+                                      <div key={i} className="w-full">
+                                          <div className="flex justify-between items-start mb-2 gap-2">
+                                              <span className="font-medium text-slate-700 text-[13px] break-words">{shortName}</span>
+                                              <span className="text-slate-400 font-medium text-[11px] flex-shrink-0 mt-0.5">{t.value} avis</span>
+                                          </div>
+                                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                                              <div 
+                                                  className="h-full rounded-full transition-all duration-1000 ease-out" 
+                                                  style={{ width: `${pct}%`, backgroundColor: THEME_COLORS[i % THEME_COLORS.length] }}
+                                              />
+                                          </div>
+                                      </div>
+                                  )
+                              })}
+                           </div>
+                        </div>
+                    </div>
+                  </div>
+                )}
+
+                {reportPreviewTab === 'data' && (
+                  <div className="p-6 md:p-8 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+                      <div className="overflow-x-auto max-h-[60vh] overflow-y-auto custom-scrollbar bg-white">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                            <tr>
+                              <th className="py-4 px-6 w-20 text-[12px] font-semibold text-slate-500 tracking-wide">ID</th>
+                              <th className="py-4 px-6 w-28 text-[12px] font-semibold text-slate-500 tracking-wide">Langue</th>
+                              <th className="py-4 px-6 text-[12px] font-semibold text-slate-500 tracking-wide">Commentaire</th>
+                              <th className="py-4 px-6 w-32 text-[12px] font-semibold text-slate-500 tracking-wide text-right">Sentiment</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100/80">
+                            {analysisResult.map((r, i) => (
+                              <tr key={i} className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                                <td className="py-4 px-6 text-slate-400 font-medium text-[12px] transition-colors group-hover:text-slate-500">
+                                  {String(r.uid).padStart(3, '0')}
+                                </td>
+                                <td className="py-4 px-6">
+                                  {renderLanguageBadge(r.language)}
+                                </td>
+                                <td className="py-4 px-6 text-[13px] text-slate-800 leading-relaxed font-medium">
+                                  {r.comment}
+                                </td>
+                                <td className="py-4 px-6 text-right">
+                                  <div className="flex justify-end">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                                      r.sentiment === 'Positive' ? 'text-emerald-700 bg-emerald-50/80' : 
+                                      r.sentiment === 'Negative' ? 'text-rose-700 bg-rose-50/80' : 
+                                      r.sentiment === 'Mixed' ? 'text-amber-700 bg-amber-50/80' :
+                                      'text-slate-600 bg-slate-100/80'
+                                    }`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${
+                                        r.sentiment === 'Positive' ? 'bg-emerald-500' : 
+                                        r.sentiment === 'Negative' ? 'bg-rose-500' : 
+                                        r.sentiment === 'Mixed' ? 'bg-amber-500' :
+                                        'bg-slate-400'
+                                      }`} />
+                                      {SENTIMENT_LABELS[r.sentiment] || r.sentiment}
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {reportPreviewTab === 'actions' && (
+                  <div className="p-6 md:p-8 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+                      <div className="overflow-x-auto max-h-[60vh] overflow-y-auto custom-scrollbar bg-white">
+                        <table className="w-full text-left border-collapse min-w-[1400px]">
+                          <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                            <tr>
+                              <th className="py-4 px-6 min-w-[250px] w-3/12 text-[12px] font-semibold text-slate-500 tracking-wide">Commentaire original</th>
+                              <th className="py-4 px-6 min-w-[200px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide">Problème identifié</th>
+                              <th className="py-4 px-6 min-w-[150px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide">Thème</th>
+                              <th className="py-4 px-6 min-w-[120px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide">Validation</th>
+                              <th className="py-4 px-6 min-w-[250px] w-2/12 text-[12px] font-semibold text-slate-500 tracking-wide">Recommandation</th>
+                              <th className="py-4 px-6 min-w-[100px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Priorité</th>
+                              <th className="py-4 px-6 min-w-[100px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Immédiate</th>
+                              <th className="py-4 px-6 min-w-[120px] w-1/12 text-[12px] font-semibold text-slate-500 tracking-wide whitespace-nowrap">Cycle de vie</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100/80">
+                            {actionableItems && actionableItems.map((a, i) => (
+                              <tr key={i} className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                                <td className="py-4 px-6 text-[13px] text-slate-500 italic font-medium align-top leading-relaxed">"{a.comment}"</td>
+                                <td className="py-4 px-6 text-[13px] text-slate-800 leading-relaxed font-medium align-top">{a.issueSummary}</td>
+                                <td className="py-4 px-6 align-top">{renderThemeBadge(a.relatedTheme)}</td>
+                                <td className="py-4 px-6 text-[13px] text-slate-500 font-medium align-top">{a.validationSS || "-"}</td>
+                                <td className="py-4 px-6 text-[13px] text-slate-500 italic align-top break-words whitespace-pre-wrap min-w-[200px]">{a.recommandation || "-"}</td>
+                                <td className="py-4 px-6 align-top">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                                    a.priorite === 'Haute' ? 'text-rose-700 bg-rose-50/80' : 
+                                    a.priorite === 'Normale' ? 'text-amber-700 bg-amber-50/80' : 
+                                    a.priorite === 'Basse' ? 'text-emerald-700 bg-emerald-50/80' :
+                                    'text-slate-600 bg-slate-100/80'
+                                  }`}>
+                                    {a.priorite && <span className={`w-1.5 h-1.5 rounded-full ${
+                                      a.priorite === 'Haute' ? 'bg-rose-500' : 
+                                      a.priorite === 'Normale' ? 'bg-amber-500' : 
+                                      a.priorite === 'Basse' ? 'bg-emerald-500' :
+                                      'bg-slate-400'
+                                    }`} />}
+                                    {a.priorite || "-"}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-6 text-[13px] text-slate-500 font-medium align-top">{a.actionImmediate || "-"}</td>
+                                <td className="py-4 px-6 text-[13px] text-slate-500 font-medium align-top">{a.cycleDeVie || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {reportPreviewTab === 'success' && (
+                  <div className="p-6 md:p-8 animate-in fade-in duration-300 min-h-[50vh] space-y-8">
+                    
+                    {positiveSummary?.keyDrivers && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {positiveSummary.keyDrivers.map((driver, index) => {
+                          const icons = [Star, Zap, Heart];
+                          const Icon = icons[index % icons.length];
+                          return (
+                            <div key={index} className="bg-white p-8 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50 flex flex-col items-center text-center hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                              <div className="w-14 h-14 rounded-full bg-blue-50/80 text-blue-500 flex items-center justify-center mb-6 border border-blue-100/50">
+                                <Icon size={24} strokeWidth={2} />
+                              </div>
+                              <h3 className="font-semibold tracking-tight text-slate-900 text-base mb-2">{driver.title}</h3>
+                              <p className="text-[13px] text-slate-500 leading-relaxed font-medium">{driver.description}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      <div className="lg:col-span-2 bg-white p-8 md:p-10 rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                        <div className="flex justify-between items-start mb-6">
+                          <h2 className="font-semibold tracking-tight text-slate-900 text-base flex items-center gap-2">
+                            <CheckCircle size={22} className="text-blue-500" />
+                            Synthèse qualitative
+                          </h2>
+                          <div className="text-right">
+                             <span className="text-[12px] font-medium text-slate-500 bg-slate-50 px-3 py-1 rounded-full border border-slate-100/50">
+                               Analyse IA
+                             </span>
+                          </div>
+                        </div>
+                        <div className="prose prose-slate max-w-none text-slate-600 font-medium leading-relaxed text-[13px]">
+                          {positiveSummary?.summary}
+                        </div>
+                      </div>
+
+                      <div className="lg:col-span-1 bg-gradient-to-br from-emerald-50/50 to-teal-50/50 p-8 md:p-10 rounded-[32px] border border-emerald-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300">
+                        <h3 className="font-semibold tracking-tight text-emerald-900 text-base mb-6 flex items-center gap-2">
+                          <ThumbsUp size={18} className="text-emerald-600" /> Mots-clés d'impact
+                        </h3>
+                        <div className="flex flex-wrap gap-2.5 content-start">
+                          {positiveSummary?.keywords && positiveSummary.keywords.map((word, i) => (
+                            <span 
+                              key={i} 
+                              className="bg-white text-emerald-700 px-3.5 py-1.5 rounded-[12px] text-[12px] font-semibold border border-emerald-100/30 shadow-sm"
+                              style={{ fontSize: `${Math.max(0.75, 1.1 - (i * 0.05))}rem`, opacity: Math.max(0.6, 1 - (i * 0.05)) }}
+                            >
+                              {word}
+                            </span>
+                          ))}
+                          {(!positiveSummary?.keywords || positiveSummary.keywords.length === 0) && <p className="text-[12px] text-emerald-600/60 italic font-medium">Aucun mot-clé extrait.</p>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {positiveSummary?.quotes && positiveSummary.quotes.length > 0 && (
+                      <div className="bg-white rounded-[32px] border border-slate-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+                           <div className="px-6 py-5 border-b border-slate-100/50 bg-white/70 backdrop-blur-xl backdrop-saturate-150 flex items-center justify-between sticky top-0 z-20">
+                             <h4 className="font-semibold tracking-tight text-slate-900 text-base">
+                               Extraits des commentaires positifs
+                             </h4>
+                           </div>
+                           
+                           <div className="overflow-x-auto overflow-y-auto max-h-[60vh] custom-scrollbar bg-white">
+                             <table className="w-full text-left border-collapse">
+                               <thead className="bg-white/80 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-10 border-b border-slate-100/50">
+                                 <tr>
+                                   <th className="py-4 px-6 w-40 text-[12px] font-semibold text-slate-500 tracking-wide">Thème</th>
+                                   <th className="py-4 px-6 w-auto text-[12px] font-semibold text-slate-500 tracking-wide">Extrait</th>
+                                 </tr>
+                               </thead>
+                               <tbody className="divide-y divide-slate-100/80">
+                                {positiveSummary.quotes.map((q, i) => (
+                                  <tr key={i} className="hover:bg-slate-50/60 transition-colors duration-200 group">
+                                    <td className="py-4 px-6 align-top">
+                                       <span className={`inline-flex items-center px-2.5 py-1 rounded-[8px] text-[11px] font-medium tracking-wide whitespace-nowrap ${
+                                         q.tag ? 'text-indigo-700 bg-indigo-50/80 border border-indigo-100/50' : 'text-slate-600 bg-slate-50/80 border border-slate-200/50'
+                                       }`}>
+                                         {q.tag || "Feedback"}
+                                       </span>
+                                    </td>
+                                    <td className="py-4 px-6 align-top">
+                                      <div className="flex items-start justify-between gap-4">
+                                        <span className="text-[13px] text-slate-700 font-medium leading-relaxed italic">"{q.comment}"</span>
+                                        <button 
+                                          onClick={() => copyToClipboard(q.comment)}
+                                          className="p-1.5 rounded-[8px] text-slate-400 hover:text-slate-800 hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+                                          title="Copier le texte"
+                                        >
+                                          <Copy size={14} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                               </tbody>
+                             </table>
+                           </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+              
+              <div className="border-t border-slate-100/50 bg-slate-50/50 relative z-20 transition-all duration-500 mt-auto">
+                
+                <div className="py-4 px-4 md:px-6 flex flex-col sm:flex-row items-center justify-end gap-3 relative z-20">
+                  <button 
+                    onClick={() => {
+                      setIsChatExpanded(!isChatExpanded);
+                      if (!isChatExpanded) {
+                        setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
+                      }
+                    }}
+                    className={`${isChatExpanded ? 'bg-slate-800 text-white' : 'bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/50'} px-6 py-3 rounded-[14px] text-[13px] font-semibold tracking-tight transition-all duration-300 flex items-center gap-2 w-full sm:w-auto justify-center active:scale-[0.98] shadow-sm`}
+                  >
+                    <MessageSquare size={16}/> {isChatExpanded ? "Fermer l'assistant" : "Chat avec le rapport"}
+                  </button>
+                  
+                  <button 
+                    onClick={generateFinalReport}
+                    className="bg-emerald-50/80 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 px-6 py-3 rounded-[14px] text-[13px] font-semibold tracking-tight transition-all duration-300 flex items-center gap-2 w-full sm:w-auto justify-center active:scale-[0.98] shadow-sm"
+                  >
+                    <FileText size={16} /> Télécharger Excel
+                  </button>
+                  
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="bg-rose-50/80 hover:bg-rose-100 text-rose-700 border border-rose-200/50 px-6 py-3 rounded-[14px] text-[13px] font-semibold tracking-tight transition-all duration-300 flex items-center gap-2 group w-full sm:w-auto justify-center active:scale-[0.98] shadow-sm"
+                  >
+                    Nouvelle analyse
+                    <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" /> 
+                  </button>
+                </div>
+
+                {isChatExpanded && (
+                  <div className="h-[500px] flex flex-col border-t border-slate-100/50 bg-slate-50/30 animate-in slide-in-from-top-10 fade-in duration-300 relative z-10">
+                     <div className="p-4 px-6 border-b border-slate-100/50 bg-white/50 flex justify-between items-center shadow-sm">
+                       <h2 className="font-semibold text-slate-800 flex items-center gap-2 text-[14px]">
+                         <Sparkles className="text-blue-500" size={16} />
+                         Assistant d'analyse
+                       </h2>
+                     </div>
+                     
+                     <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                       {chatHistory.map((msg, i) => (
+                         <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                           {msg.role === 'user' && (
+                             <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-slate-800 text-white">
+                               <User size={14}/>
+                             </div>
+                           )}
+                           <div className={`max-w-[80%] p-4 text-[13px] leading-relaxed shadow-[0_2px_10px_rgb(0,0,0,0.02)] ${msg.role === 'user' ? 'bg-slate-800 text-white rounded-[16px] rounded-tr-[4px]' : 'bg-white border border-slate-100/50 text-slate-700 rounded-[16px] rounded-tl-[4px] font-medium'}`}>
+                             {msg.text}
+                           </div>
+                         </div>
+                       ))}
+                       {isChatLoading && (
+                         <div className="flex gap-3">
+                           <div className="bg-white border border-slate-100/50 p-4 rounded-[16px] rounded-tl-[4px] shadow-[0_2px_10px_rgb(0,0,0,0.02)] flex items-center gap-1.5 mt-1">
+                             <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce" />
+                             <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce delay-100" />
+                             <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce delay-200" />
+                           </div>
+                         </div>
+                       )}
+                       <div ref={chatEndRef} />
+                     </div>
+
+                     <div className="p-4 md:px-6 border-t border-slate-100/50 bg-white">
+                       <form onSubmit={handleChatSubmit} className="relative flex gap-2">
+                         <input
+                           type="text"
+                           value={chatInput}
+                           onChange={(e) => setChatInput(e.target.value)}
+                           placeholder="Posez votre question..."
+                           className="w-full pl-5 pr-14 py-3.5 rounded-full border border-slate-200/80 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 outline-none transition-all shadow-sm bg-slate-50/50 text-[13px] font-medium placeholder:text-slate-400"
+                           disabled={!isChatAccessible}
+                         />
+                         <button 
+                           type="submit"
+                           disabled={!chatInput.trim() || isChatLoading || !isChatAccessible}
+                           className="absolute right-1.5 top-1.5 bottom-1.5 aspect-square bg-blue-500 text-white rounded-full flex items-center justify-center hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-blue-500 transition-colors shadow-sm"
+                         >
+                           <Send size={16} className="-ml-0.5" />
+                         </button>
+                       </form>
+                     </div>
+                  </div>
+                )}
+              </div>
+            </div> 
+          </div>
+        )}
+
+        {/* Nouvel Overlay de Chargement Minimaliste et Abstrait */}
+        {isProcessing && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-2xl transition-all duration-1000 animate-in fade-in">
+            {/* Formes abstraites floutées en arrière-plan pour l'effet "IA" */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none flex items-center justify-center opacity-80">
+               <div className="absolute w-[50vw] h-[50vw] max-w-[600px] max-h-[600px] bg-indigo-500/20 rounded-full blur-[100px] animate-[spin_10s_linear_infinite] origin-bottom-right" />
+               <div className="absolute w-[40vw] h-[40vw] max-w-[500px] max-h-[500px] bg-purple-500/20 rounded-full blur-[100px] animate-[spin_15s_linear_infinite_reverse] origin-top-left" />
+               <div className="absolute w-[30vw] h-[30vw] max-w-[400px] max-h-[400px] bg-blue-400/20 rounded-full blur-[80px] animate-pulse" style={{ animationDuration: '4s' }} />
+            </div>
+
+            {/* Logo Prism en haut à gauche */}
+            <div className="absolute top-4 left-6 md:top-6 md:left-8 flex items-baseline gap-2 z-20">
+               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white self-center">
+                 <path d="M12 2L2 20h20L12 2z" />
+                 <path d="M12 2v18" />
+                 <path d="M2 20l10-8 10 8" />
+               </svg>
+               <span className="text-white font-extrabold text-2xl tracking-tighter">Prism.</span>
+               <span className="text-white/80 text-[12px] font-medium tracking-wide hidden sm:inline-block">
+                 Analyse qualitative
+               </span>
+            </div>
+
+            {/* Texte minimaliste et compteur de temps typographique */}
+            <div className="relative z-10 flex flex-col items-center gap-8">
+               <span className="text-white text-[16px] md:text-[19px] font-medium tracking-[0.5em] uppercase">
+                 Analyse en cours
+               </span>
+               
+               {estimatedTimeRemaining !== null && estimatedTimeRemaining > 0 && (
+                 <div className="flex flex-col items-center justify-center animate-in fade-in duration-700 delay-500 fill-mode-both gap-1.5 mt-2">
+                    <span className="text-white/60 text-[10px] font-medium tracking-[0.3em] uppercase">
+                      Temps estimé
+                    </span>
+                    <div className="flex items-baseline gap-1.5">
+                      {estimatedTimeRemaining >= 60 && (
+                        <>
+                          <span className="text-[24px] md:text-[28px] font-light text-white/90">
+                            {Math.floor(estimatedTimeRemaining / 60)}
+                          </span>
+                          <span className="text-[10px] md:text-[11px] font-medium tracking-[0.1em] text-white/50 uppercase mr-2">
+                            min
+                          </span>
+                        </>
+                      )}
+                      <span className="text-[24px] md:text-[28px] font-light text-white/90">
+                        {estimatedTimeRemaining % 60}
+                      </span>
+                      <span className="text-[10px] md:text-[11px] font-medium tracking-[0.1em] text-white/50 uppercase">
+                        sec
+                      </span>
+                    </div>
+                 </div>
+               )}
+            </div>
+          </div>
+        )}
+
+        {isDetectingMetadata && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[70] animate-in slide-in-from-bottom-5">
+             <div className="flex items-center gap-2.5 bg-slate-800/95 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-[0_10px_40px_rgb(0,0,0,0.2)] text-[13px] font-medium tracking-wide border border-slate-700">
+               <Loader2 size={16} className="animate-spin text-blue-400" />
+               Détection en cours...
+             </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="fixed bottom-8 right-8 bg-white border border-rose-100 p-5 rounded-[20px] shadow-[0_10px_40px_rgb(225,29,72,0.1)] flex items-center gap-4 animate-in slide-in-from-right-12 duration-300 z-[60]">
+            <div className="bg-rose-50 p-2.5 rounded-[12px] text-rose-500 border border-rose-100/50">
+              <AlertCircle size={24} />
+            </div>
+            <div className="pr-4">
+              <p className="text-slate-800 font-semibold text-[14px]">Action requise</p>
+              <p className="text-slate-500 text-[12px] font-medium">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="p-1.5 hover:bg-slate-50 rounded-[8px] text-slate-400 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {toastMessage && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800/95 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-[0_10px_40px_rgb(0,0,0,0.2)] flex items-center gap-2.5 animate-in slide-in-from-bottom-5 z-[70] border border-slate-700">
+            <CheckCircle size={16} className="text-emerald-400" />
+            <span className="text-[13px] font-medium tracking-wide">{toastMessage}</span>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default App;
